@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>赶羊游戏</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #7cc26b;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+  #hud {
+    position: fixed;
+    top: 16px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+  #banner {
+    position: fixed;
+    top: 38%;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #fff;
+    font-size: 56px;
+    font-weight: 800;
+    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    opacity: 0;
+  }
+  #banner.play { animation: bannerFade 1.6s ease-out forwards; }
+  @keyframes bannerFade {
+    0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
+    15%  { opacity: 1; transform: none; }
+    70%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  #hint {
+    position: fixed;
+    bottom: 24px;
+    left: 16px;
+    right: 16px;
+    text-align: center;
+    color: #fff;
+    font-size: 17px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  #hint.show { opacity: 1; }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    color: #fff;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 {
+    margin: 0 0 12px;
+    font-size: 60px;
+    text-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  }
+  #overlay p {
+    margin: 0 0 28px;
+    font-size: 20px;
+  }
+  #nextBtn {
+    padding: 12px 40px;
+    border: none;
+    border-radius: 999px;
+    background: #ffb400;
+    color: #5a3b00;
+    font-size: 22px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 5px 0 #c98a00;
+  }
+  #nextBtn:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 #c98a00;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"></div>
+<div id="banner"></div>
+<div id="hint">点小羊，它会朝自己面对的方向冲出去；被挡住的羊冲不出去</div>
+<div id="overlay">
+  <h1 id="overlayTitle"></h1>
+  <p id="overlayText"></p>
+  <button id="nextBtn"></button>
+</div>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+const banner = document.getElementById('banner');
+const hint = document.getElementById('hint');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlayTitle');
+const overlayText = document.getElementById('overlayText');
+const nextBtn = document.getElementById('nextBtn');
+
+// 10 关：棋盘行数、列数、羊的数量、栅栏数量、背景配色（THEMES 的下标）
+const LEVELS = [
+  { rows: 4, cols: 4, sheep: 4,  fences: 0, theme: 0 },
+  { rows: 4, cols: 5, sheep: 6,  fences: 1, theme: 0 },
+  { rows: 5, cols: 5, sheep: 8,  fences: 2, theme: 0 },
+  { rows: 5, cols: 6, sheep: 10, fences: 3, theme: 1 },
+  { rows: 6, cols: 6, sheep: 12, fences: 4, theme: 1 },
+  { rows: 6, cols: 7, sheep: 15, fences: 5, theme: 1 },
+  { rows: 7, cols: 7, sheep: 18, fences: 6, theme: 2 },
+  { rows: 7, cols: 8, sheep: 21, fences: 7, theme: 2 },
+  { rows: 8, cols: 8, sheep: 24, fences: 8, theme: 2 },
+  { rows: 8, cols: 9, sheep: 28, fences: 9, theme: 2 },
+];
+// 背景配色：top / bottom 是渐变色，dark 是草丛和色块的深色（RGB）
+const THEMES = [
+  { top: '#9bdc8a', bottom: '#6bb65a', dark: '30,100,30' },   // 春天
+  { top: '#ebe196', bottom: '#bfae5e', dark: '110,90,30' },   // 秋天
+  { top: '#93b9ad', bottom: '#4f7f58', dark: '20,55,40' },    // 傍晚
+];
+// 方向：0 上、1 右、2 下、3 左；每个方向对应的 [行变化, 列变化]
+const DIRS = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+// 羊毛的圆圈（单位是“一格”的比例；羊先朝右画，再旋转到实际朝向）
+const WOOL = [{ x: 0, y: 0, r: 0.2 }];
+for (let i = 0; i < 8; i++) {
+  const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+  WOOL.push({ x: Math.cos(a) * 0.19, y: Math.sin(a) * 0.16, r: 0.14 });
+}
+
+let W = 0, H = 0, dpr = 1;
+let cell = 40, ox = 0, oy = 0;   // 一格的大小，棋盘左上角的位置（CSS 像素）
+let rows = 4, cols = 4;
+let grass = null;                // 当前关卡的草地背景
+
+let level = 1;
+let board = [];        // board[r][c]：null 空地 | 'F' 栅栏 | 羊对象 { r, c, d, shake }
+let sheepList = [];    // 还留在棋盘上的羊
+let dashers = [];      // 正在冲出去的羊：已经从棋盘移走，只负责播动画
+let particles = [];
+let hoverSheep = null;
+let state = 'playing'; // 'playing' 游戏中 | 'cleared' 本关已过
+let levelTime = 0;
+let totalTime = 0;     // 已经通过的关卡总用时
+let clearTimer = null;
+let hudText = '';
+let last = performance.now();
+
+const fmt = (t) => {
+  const s = Math.floor(t);
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+};
+const rand = (n) => Math.floor(Math.random() * n);
+const inside = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
+
+function showBanner(text) {
+  banner.textContent = text;
+  banner.classList.remove('play');
+  void banner.offsetWidth;   // 强制重排，让动画能重新播放
+  banner.classList.add('play');
+}
+
+// 从这一格朝 d 方向一直看到棋盘边缘：中间没有栅栏和羊，就能冲出去
+function rayClear(r, c, d) {
+  const [dr, dc] = DIRS[d];
+  for (let rr = r + dr, cc = c + dc; inside(rr, cc); rr += dr, cc += dc) {
+    if (board[rr][cc]) return false;
+  }
+  return true;
+}
+
+// 生成一关：先随机放栅栏，再倒着摆羊。每只羊摆下去时，它脸朝的方向都是通的，
+// 所以按放的相反顺序一只只点，一定能全部冲出去（关卡必定有解）
+function generateLevel(cfg) {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    board = Array.from({ length: rows }, () => new Array(cols).fill(null));
+    for (let f = 0, tries = 0; f < cfg.fences && tries < 1000; tries++) {
+      const r = rand(rows), c = rand(cols);
+      if (!board[r][c]) { board[r][c] = 'F'; f++; }
+    }
+    const list = [];
+    let fails = 0;
+    while (list.length < cfg.sheep && fails < 300) {
+      const r = rand(rows), c = rand(cols);
+      if (board[r][c]) { fails++; continue; }
+      const d0 = rand(4);
+      let d = -1;
+      for (let k = 0; k < 4 && d < 0; k++) {
+        if (rayClear(r, c, (d0 + k) % 4)) d = (d0 + k) % 4;
+      }
+      if (d < 0) { fails++; continue; }
+      const s = { r, c, d, shake: 0 };
+      board[r][c] = s;
+      list.push(s);
+      fails = 0;
+    }
+    if (list.length === cfg.sheep) return list;
+  }
+  return null;
+}
+
+function layoutBoard() {
+  const top = 70, bottom = 70;                 // 上面留给 HUD，下面留给提示
+  const availW = W - 40, availH = H - top - bottom;
+  cell = Math.min(availW / cols, availH / rows, 110);
+  ox = (W - cols * cell) / 2;
+  oy = top + (availH - rows * cell) / 2;
+}
+
+function cellCenter(r, c) {
+  return { x: ox + (c + 0.5) * cell, y: oy + (r + 0.5) * cell };
+}
+
+// 找到被点中的羊（点的是哪一格）
+function sheepAt(x, y) {
+  const c = Math.floor((x - ox) / cell), r = Math.floor((y - oy) / cell);
+  if (!inside(r, c)) return null;
+  const v = board[r][c];
+  return v && v !== 'F' ? v : null;
+}
+
+// 点羊：前面通畅就冲出去，被挡住就原地抖一下
+function tapSheep(s) {
+  if (!rayClear(s.r, s.c, s.d)) {
+    s.shake = 0.4;
+    return;
+  }
+  board[s.r][s.c] = null;        // 马上从棋盘移走，后面的羊立刻就能看到空位
+  sheepList = sheepList.filter((o) => o !== s);
+  if (hoverSheep === s) hoverSheep = null;
+  const [dr, dc] = DIRS[s.d];
+  dashers.push({ x: s.c + 0.5, y: s.r + 0.5, dx: dc, dy: dr, d: s.d, t: 0, dustT: 0 });
+}
+
+function spawnDust(x, y) {
+  particles.push({
+    x: x + (Math.random() - 0.5) * cell * 0.3,
+    y: y + (Math.random() - 0.5) * cell * 0.1,
+    vx: (Math.random() - 0.5) * cell * 0.4,
+    vy: -(0.1 + Math.random() * 0.2) * cell,
+    r: cell * (0.07 + Math.random() * 0.05),
+    life: 0,
+    max: 0.45 + Math.random() * 0.3,
+  });
+}
+
+function updateDashers(dt) {
+  for (const d of dashers) {
+    d.t += dt;
+    const speed = Math.min(18, 4 + d.t * 40);   // 每秒走几格：先慢后快
+    d.x += d.dx * speed * dt;
+    d.y += d.dy * speed * dt;
+    d.dustT -= dt;
+    if (d.dustT <= 0) {
+      d.dustT = 0.08;
+      spawnDust(ox + (d.x - d.dx * 0.3) * cell, oy + (d.y - d.dy * 0.3) * cell);
+    }
+  }
+  // 整只羊都跑出棋盘外面了，就移除
+  dashers = dashers.filter((d) => d.x > -1 && d.x < cols + 1 && d.y > -1 && d.y < rows + 1);
+}
+
+function updateParticles(dt) {
+  for (const p of particles) {
+    p.life += dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.r += cell * 0.2 * dt;
+  }
+  particles = particles.filter((p) => p.life < p.max);
+}
+
+function update(dt) {
+  if (state === 'playing') levelTime += dt;
+  for (const s of sheepList) s.shake = Math.max(0, s.shake - dt);
+  updateDashers(dt);
+  updateParticles(dt);
+
+  // 最后一只羊跑出棋盘，就过关
+  if (state === 'playing' && sheepList.length === 0 && dashers.length === 0) {
+    state = 'cleared';
+    totalTime += levelTime;
+    clearTimer = setTimeout(showClear, 600);
+  }
+}
+
+// 栅栏：一块木板
+function drawFence(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(cell, cell);
+  ctx.fillStyle = '#a57b52';
+  ctx.fillRect(-0.44, -0.44, 0.88, 0.88);
+  ctx.fillStyle = '#7d5a37';
+  ctx.fillRect(-0.44, -0.22, 0.88, 0.09);
+  ctx.fillRect(-0.44, 0.13, 0.88, 0.09);
+  ctx.fillStyle = '#5e4128';
+  for (const [px, py] of [[-0.4, -0.4], [0.3, -0.4], [-0.4, 0.3], [0.3, 0.3]]) {
+    ctx.fillRect(px, py, 0.1, 0.1);
+  }
+  ctx.restore();
+}
+
+// 俯视的小羊：羊毛 + 朝前的黑脑袋 + 四只小腿。先按“一格”的比例画，再旋转到朝向
+function drawSheepTop(x, y, d, shakePx) {
+  // 影子不跟着旋转
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  ctx.beginPath();
+  ctx.ellipse(x + shakePx + cell * 0.04, y + cell * 0.05, cell * 0.36, cell * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(x + shakePx, y);
+  ctx.rotate((d - 1) * Math.PI / 2);   // d=0 朝上，1 朝右，2 朝下，3 朝左
+  ctx.scale(cell, cell);
+
+  // 腿
+  ctx.fillStyle = '#4a4440';
+  for (const [lx, ly] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) {
+    ctx.beginPath();
+    ctx.arc(lx, ly, 0.07, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 羊毛：先画一层深色描边，再画白色
+  ctx.fillStyle = '#cfc9bd';
+  for (const p of WOOL) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r + 0.025, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#fbfaf5';
+  for (const p of WOOL) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // 耳朵、脑袋
+  ctx.fillStyle = '#4a4440';
+  ctx.beginPath();
+  ctx.ellipse(0.22, -0.14, 0.07, 0.04, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0.22, 0.14, 0.07, 0.04, 0.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(0.27, 0, 0.15, 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 眼睛
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(0.33, -0.06, 0.04, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0.33, 0.06, 0.04, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(0.345, -0.06, 0.02, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0.345, 0.06, 0.02, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBoard() {
+  const bw = cols * cell, bh = rows * cell;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+  ctx.fillRect(ox - 8, oy - 8, bw + 16, bh + 16);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let r = 0; r <= rows; r++) {
+    ctx.moveTo(ox, oy + r * cell);
+    ctx.lineTo(ox + bw, oy + r * cell);
+  }
+  for (let c = 0; c <= cols; c++) {
+    ctx.moveTo(ox + c * cell, oy);
+    ctx.lineTo(ox + c * cell, oy + bh);
+  }
+  ctx.stroke();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c] === 'F') {
+        const p = cellCenter(r, c);
+        drawFence(p.x, p.y);
+      }
+    }
+  }
+}
+
+// 鼠标移到羊上时，画出它会走的路：通畅是白点，被挡住是红色
+function drawPath(s) {
+  const clear = rayClear(s.r, s.c, s.d);
+  const [dr, dc] = DIRS[s.d];
+  for (let rr = s.r + dr, cc = s.c + dc; inside(rr, cc); rr += dr, cc += dc) {
+    const p = cellCenter(rr, cc);
+    const blocked = !!board[rr][cc];
+    ctx.fillStyle = blocked ? 'rgba(229, 57, 53, 0.9)' : (clear ? 'rgba(255, 255, 255, 0.85)' : 'rgba(229, 57, 53, 0.6)');
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, cell * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+    if (blocked) break;
+  }
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(grass, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  drawBoard();
+  if (hoverSheep && state === 'playing' && board[hoverSheep.r][hoverSheep.c] === hoverSheep) {
+    drawPath(hoverSheep);
+  }
+
+  // 尘土
+  ctx.fillStyle = '#f5f2e8';
+  for (const p of particles) {
+    ctx.globalAlpha = (1 - p.life / p.max) * 0.6;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // 还在棋盘上的羊
+  for (const s of sheepList) {
+    const p = cellCenter(s.r, s.c);
+    const shakePx = s.shake > 0 ? Math.sin(s.shake * 70) * cell * 0.08 * (s.shake / 0.4) : 0;
+    drawSheepTop(p.x, p.y, s.d, shakePx);
+    if (s.shake > 0) {
+      ctx.strokeStyle = `rgba(229, 57, 53, ${s.shake / 0.4})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, cell * 0.46, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  // 正在冲出去的羊画在最上面
+  for (const d of dashers) {
+    drawSheepTop(ox + d.x * cell, oy + d.y * cell, d.d, 0);
+  }
+}
+
+// 草地背景：每关换一次配色，每关只画一次，之后每帧直接贴图
+function buildGrass() {
+  const th = THEMES[LEVELS[level - 1].theme];
+  grass = document.createElement('canvas');
+  grass.width = canvas.width;
+  grass.height = canvas.height;
+  const g = grass.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const base = g.createLinearGradient(0, 0, 0, H);
+  base.addColorStop(0, th.top);
+  base.addColorStop(1, th.bottom);
+  g.fillStyle = base;
+  g.fillRect(0, 0, W, H);
+
+  // 深浅不一的草地色块
+  for (let i = 0; i < (W * H) / 9000; i++) {
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.07)' : `rgba(${th.dark},0.10)`;
+    g.beginPath();
+    g.arc(Math.random() * W, Math.random() * H, 20 + Math.random() * 60, 0, Math.PI * 2);
+    g.fill();
+  }
+  // 小草丛
+  g.strokeStyle = `rgba(${th.dark},0.45)`;
+  g.lineWidth = 2;
+  g.lineCap = 'round';
+  g.beginPath();
+  for (let i = 0; i < (W * H) / 3000; i++) {
+    const x = Math.random() * W, y = Math.random() * H, s = 4 + Math.random() * 4;
+    g.moveTo(x - s, y); g.lineTo(x - s / 2, y - s);
+    g.moveTo(x, y); g.lineTo(x, y - s * 1.5);
+    g.moveTo(x + s, y); g.lineTo(x + s / 2, y - s);
+  }
+  g.stroke();
+  // 小花
+  for (let i = 0; i < (W * H) / 25000; i++) {
+    g.fillStyle = Math.random() < 0.5 ? '#fff7b0' : '#ffffff';
+    g.beginPath();
+    g.arc(Math.random() * W, Math.random() * H, 2.5, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  layoutBoard();
+  buildGrass();
+}
+
+function startLevel() {
+  const cfg = LEVELS[level - 1];
+  rows = cfg.rows;
+  cols = cfg.cols;
+  layoutBoard();
+  buildGrass();
+  let list = null;
+  for (let n = cfg.sheep; !list && n > 0; n--) list = generateLevel({ ...cfg, sheep: n });
+  sheepList = list || [];
+  dashers = [];
+  particles = [];
+  hoverSheep = null;
+  levelTime = 0;
+  state = 'playing';
+  clearTimeout(clearTimer);
+  overlay.classList.remove('show');
+  hint.classList.toggle('show', level === 1);
+  showBanner(`第 ${level} 关`);
+}
+
+// 下一关；通关最后一关之后，再玩就从第 1 关重新开始
+function advance() {
+  if (state !== 'cleared') return;
+  if (level < LEVELS.length) {
+    level++;
+  } else {
+    level = 1;
+    totalTime = 0;
+  }
+  startLevel();
+}
+
+function showClear() {
+  if (level < LEVELS.length) {
+    overlayTitle.textContent = '过关！';
+    overlayText.textContent = `第 ${level} 关用时 ${fmt(levelTime)}`;
+    nextBtn.textContent = '下一关';
+  } else {
+    overlayTitle.textContent = '全部通关！';
+    overlayText.textContent = `${LEVELS.length} 关全部通过，总用时 ${fmt(totalTime)}`;
+    nextBtn.textContent = '再玩一次';
+  }
+  overlay.classList.add('show');
+}
+
+function loop(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);   // 切换标签页回来时别一下子跳太远
+  last = now;
+  update(dt);
+  draw();
+
+  const t = `第 ${level}/${LEVELS.length} 关　剩余 ${sheepList.length + dashers.length} 只　${fmt(levelTime)}`;
+  if (t !== hudText) {
+    hudText = t;
+    hud.textContent = t;
+  }
+  requestAnimationFrame(loop);
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  hint.classList.remove('show');
+  if (state !== 'playing') return;
+  const s = sheepAt(e.clientX, e.clientY);
+  if (s) tapSheep(s);
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  hoverSheep = state === 'playing' ? sheepAt(e.clientX, e.clientY) : null;
+  canvas.style.cursor = hoverSheep ? 'pointer' : 'default';
+});
+
+nextBtn.addEventListener('click', advance);
+
+window.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && state === 'cleared' && overlay.classList.contains('show')) {
+    e.preventDefault();
+    advance();
+  }
+});
+
+window.addEventListener('resize', resize);
+
+resize();
+startLevel();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
