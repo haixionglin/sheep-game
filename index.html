@@ -34,6 +34,19 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
+  #resetBtn {
+    position: fixed;
+    bottom: 12px;
+    right: 12px;
+    padding: 6px 14px;
+    border: none;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.6);
+    color: #3a5a2a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
   #banner {
     position: fixed;
     top: 38%;
@@ -56,7 +69,7 @@
   }
   #hint {
     position: fixed;
-    bottom: 24px;
+    bottom: 56px;
     left: 16px;
     right: 16px;
     text-align: center;
@@ -108,6 +121,7 @@
 <body>
 <canvas id="game"></canvas>
 <div id="hud"></div>
+<button id="resetBtn" type="button">重新开始</button>
 <div id="banner"></div>
 <div id="hint">点小羊，它会朝自己面对的方向冲出去；被挡住的羊冲不出去</div>
 <div id="overlay">
@@ -125,25 +139,156 @@ const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlayTitle');
 const overlayText = document.getElementById('overlayText');
 const nextBtn = document.getElementById('nextBtn');
+const resetBtn = document.getElementById('resetBtn');
 
-// 10 关：棋盘行数、列数、羊的数量、栅栏数量、背景配色（THEMES 的下标）
+const SAVE_KEY = 'sheep-game-save-v1';
+
+// 20 关。第 1–10 关是随机摆局；第 11–20 关是设计好的固定棋盘（layout）
+// layout 符号：'.' 空地，'#' 栅栏，'^' '>' 'v' '<' 是羊（箭头就是它朝的方向）
 const LEVELS = [
-  { rows: 4, cols: 4, sheep: 4,  fences: 0, theme: 0 },
-  { rows: 4, cols: 5, sheep: 6,  fences: 1, theme: 0 },
-  { rows: 5, cols: 5, sheep: 8,  fences: 2, theme: 0 },
-  { rows: 5, cols: 6, sheep: 10, fences: 3, theme: 1 },
-  { rows: 6, cols: 6, sheep: 12, fences: 4, theme: 1 },
-  { rows: 6, cols: 7, sheep: 15, fences: 5, theme: 1 },
-  { rows: 7, cols: 7, sheep: 18, fences: 6, theme: 2 },
-  { rows: 7, cols: 8, sheep: 21, fences: 7, theme: 2 },
-  { rows: 8, cols: 8, sheep: 24, fences: 8, theme: 2 },
-  { rows: 8, cols: 9, sheep: 28, fences: 9, theme: 2 },
+  { rows: 4, cols: 4, sheep: 4,  fences: 0,  theme: 0 },
+  { rows: 4, cols: 5, sheep: 6,  fences: 1,  theme: 0 },
+  { rows: 5, cols: 5, sheep: 8,  fences: 2,  theme: 0 },
+  { rows: 5, cols: 6, sheep: 10, fences: 3,  theme: 1 },
+  { rows: 6, cols: 6, sheep: 12, fences: 4,  theme: 1 },
+  { rows: 6, cols: 7, sheep: 15, fences: 5,  theme: 1 },
+  { rows: 7, cols: 7, sheep: 18, fences: 6,  theme: 2 },
+  { rows: 7, cols: 8, sheep: 21, fences: 7,  theme: 2 },
+  { rows: 8, cols: 8, sheep: 24, fences: 8,  theme: 2 },
+  { rows: 8, cols: 9, sheep: 28, fences: 9,  theme: 2 },
+  { theme: 2, layout: [  // 第 11 关
+    '^...<<..<',
+    '^...<^>v.',
+    '^vv<..^v<',
+    '.v.<^#.v#',
+    '...^^..<.',
+    '#.v.^#..#',
+    '#vv.^#..#',
+    '..v...^.#',
+    '#>>>....>',
+  ] },
+  { theme: 2, layout: [  // 第 12 关
+    '##....##.',
+    '..<<>...v',
+    '##.^..#.v',
+    '#..^^#v>v',
+    '#.^..#vv.',
+    'vv.^>vv..',
+    '.vv..v.<<',
+    'v.v^<.<<.',
+    '>>>^.>...',
+  ] },
+  { theme: 2, layout: [  // 第 13 关
+    '#.#>.>.>v.',
+    '#.#....^v#',
+    '...v.>>>v.',
+    '>>>.>.>>v.',
+    '...v....v#',
+    '.^.>>.^^v.',
+    '##v.^..^>v',
+    '.#..^v.#.v',
+    '##>.^>v>.v',
+  ] },
+  { theme: 3, layout: [  // 第 14 关
+    '.v<<..<<<.',
+    '.v^...<..<',
+    '#...##.#^^',
+    '>.......v.',
+    'vv##.#>..^',
+    '.>>>vv....',
+    '.>v>>>.vv.',
+    'v<<.<..<v#',
+    'vv.#v.#.v#',
+    'v<..<...<#',
+  ] },
+  { theme: 3, layout: [  // 第 15 关
+    '.v.##...#.',
+    '^<.<<.<##.',
+    '^v<##...>v',
+    '..^<v<..<<',
+    '.v<#..^##.',
+    '^.<..<#>v.',
+    '.>..>.>>.v',
+    '^>>.>..v>v',
+    '^v##.>.v..',
+    '^<.....<<<',
+  ] },
+  { theme: 3, layout: [  // 第 16 关
+    '<<<<<<<<<<',
+    '.^^<^>^..^',
+    '^.>>.>.>>^',
+    '>>^.>.^...',
+    '^^...##...',
+    '^^<..##.#^',
+    '..^<#>.^.^',
+    '^<<.<<<##.',
+    '^^.#....#.',
+    '#....#..#.',
+  ] },
+  { theme: 3, layout: [  // 第 17 关
+    '..>.>>..>>',
+    '>.^v^>>>^.',
+    '^v^..##>>^',
+    '....>..>^^',
+    '^<^v<.<..<',
+    '#>^v>..>>^',
+    '..^v###..^',
+    '#.^v.####^',
+    '..^<.<<#.^',
+    '....#.#>.^',
+  ] },
+  { theme: 3, layout: [  // 第 18 关
+    '.v<.v<<##.',
+    '....v<<#v^',
+    '>..>.^^.v^',
+    '.v<<v<<.>^',
+    'vv^#.###.^',
+    '.v..v###v.',
+    '....v##..^',
+    'vv^#>..>.^',
+    '..^<<.<#v^',
+    '>>>..>>.>^',
+  ] },
+  { theme: 3, layout: [  // 第 19 关
+    '.##>>>v...',
+    'v<.^..v#.#',
+    '..#>.>>>>v',
+    '...^<^.<<v',
+    '..###..>^.',
+    '...##v.##v',
+    'v<..v<<<<<',
+    'v##v>>.v>v',
+    'v<..v<<v#v',
+    'v<<<<..<<<',
+  ] },
+  { theme: 3, layout: [  // 第 20 关
+    '^<.#>>v...',
+    '^<>v^>vv..',
+    '^.v.^..<.#',
+    '^<<v.^v.##',
+    '^^<...>v..',
+    '^<v>>^.v..',
+    '^<v.<<vv##',
+    '^..v##.v##',
+    '^..v<<<<<#',
+    '^<<<##..##',
+  ] },
 ];
+// 第 11–20 关：行列、羊数、栅栏数都从棋盘上数出来
+for (const cfg of LEVELS) {
+  if (cfg.layout) {
+    cfg.rows = cfg.layout.length;
+    cfg.cols = cfg.layout[0].length;
+    cfg.sheep = cfg.layout.join('').replace(/[.#]/g, '').length;
+    cfg.fences = cfg.layout.join('').replace(/[^#]/g, '').length;
+  }
+}
 // 背景配色：top / bottom 是渐变色，dark 是草丛和色块的深色（RGB）
 const THEMES = [
   { top: '#9bdc8a', bottom: '#6bb65a', dark: '30,100,30' },   // 春天
   { top: '#ebe196', bottom: '#bfae5e', dark: '110,90,30' },   // 秋天
   { top: '#93b9ad', bottom: '#4f7f58', dark: '20,55,40' },    // 傍晚
+  { top: '#8fa9b8', bottom: '#56707f', dark: '25,45,60' },    // 月夜
 ];
 // 方向：0 上、1 右、2 下、3 左；每个方向对应的 [行变化, 列变化]
 const DIRS = [[-1, 0], [0, 1], [1, 0], [0, -1]];
@@ -195,38 +340,115 @@ function rayClear(r, c, d) {
   return true;
 }
 
-// 生成一关：先随机放栅栏，再倒着摆羊。每只羊摆下去时，它脸朝的方向都是通的，
-// 所以按放的相反顺序一只只点，一定能全部冲出去（关卡必定有解）
-function generateLevel(cfg) {
-  for (let attempt = 0; attempt < 300; attempt++) {
-    board = Array.from({ length: rows }, () => new Array(cols).fill(null));
-    for (let f = 0, tries = 0; f < cfg.fences && tries < 1000; tries++) {
-      const r = rand(rows), c = rand(cols);
-      if (!board[r][c]) { board[r][c] = 'F'; f++; }
+// 第 1–10 关：随机摆一局。先放栅栏，再倒着摆羊（每只羊摆下去时朝向都是通的，所以一定有解）
+function makeBoard(cfg) {
+  const grid = Array.from({ length: rows }, () => new Array(cols).fill(null));
+  board = grid;
+  let placedFences = 0;
+  for (let tries = 0; placedFences < cfg.fences && tries < 1000; tries++) {
+    const r = rand(rows), c = rand(cols);
+    if (!grid[r][c]) { grid[r][c] = 'F'; placedFences++; }
+  }
+  const list = [];
+  while (list.length < cfg.sheep) {
+    const opts = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (grid[r][c]) continue;
+        for (let d = 0; d < 4; d++) {
+          if (rayClear(r, c, d)) opts.push([r, c, d]);
+        }
+      }
+    }
+    if (!opts.length) return null;
+    const [r, c, d] = opts[rand(opts.length)];
+    const s = { r, c, d, shake: 0 };
+    grid[r][c] = s;
+    list.push(s);
+  }
+  return list;
+}
+
+// 第 11 关起：把设计好的棋盘变成格子。'#' 栅栏；'^' '>' 'v' '<' 是羊，d 为 0 上、1 右、2 下、3 左
+const ARROW_DIR = { '^': 0, '>': 1, 'v': 2, '<': 3 };
+function parseLayout(lines) {
+  const grid = lines.map((line, r) => [...line].map((ch, c) => {
+    if (ch === '#') return 'F';
+    if (ch in ARROW_DIR) return { r, c, d: ARROW_DIR[ch], shake: 0 };
+    return null;
+  }));
+  const list = [];
+  for (const row of grid) {
+    for (const v of row) {
+      if (v && v !== 'F') list.push(v);
+    }
+  }
+  return { grid, list };
+}
+
+// ---------- 存档 ----------
+// 存的是：关卡号、总用时、本关用时、棋盘上的栅栏和羊（位置、朝向）
+function saveGame() {
+  const fences = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c] === 'F') fences.push([r, c]);
+    }
+  }
+  const data = {
+    v: 1,
+    level,
+    totalTime,
+    levelTime,
+    cleared: state === 'cleared',
+    fences,
+    sheep: sheepList.map((s) => [s.r, s.c, s.d]),
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) {
+    // 浏览器不让存（比如隐私模式）就算了，游戏照常能玩
+  }
+}
+
+function loadGame() {
+  try {
+    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (!data || data.v !== 1 || !LEVELS[data.level - 1]) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 把存档里的棋盘还原出来；存档有问题就返回 null，改为重新摆一局
+function restoreBoard(data) {
+  const cfg = LEVELS[data.level - 1];
+  try {
+    rows = cfg.rows;
+    cols = cfg.cols;
+    const grid = Array.from({ length: rows }, () => new Array(cols).fill(null));
+    const okCell = (r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < rows && c >= 0 && c < cols;
+    for (const [r, c] of data.fences) {
+      if (!okCell(r, c) || grid[r][c]) return null;
+      grid[r][c] = 'F';
     }
     const list = [];
-    let fails = 0;
-    while (list.length < cfg.sheep && fails < 300) {
-      const r = rand(rows), c = rand(cols);
-      if (board[r][c]) { fails++; continue; }
-      const d0 = rand(4);
-      let d = -1;
-      for (let k = 0; k < 4 && d < 0; k++) {
-        if (rayClear(r, c, (d0 + k) % 4)) d = (d0 + k) % 4;
-      }
-      if (d < 0) { fails++; continue; }
+    for (const [r, c, d] of data.sheep) {
+      if (!okCell(r, c) || grid[r][c] || !Number.isInteger(d) || d < 0 || d > 3) return null;
       const s = { r, c, d, shake: 0 };
-      board[r][c] = s;
+      grid[r][c] = s;
       list.push(s);
-      fails = 0;
     }
-    if (list.length === cfg.sheep) return list;
+    board = grid;
+    return list;
+  } catch (e) {
+    return null;
   }
-  return null;
 }
 
 function layoutBoard() {
-  const top = 70, bottom = 70;                 // 上面留给 HUD，下面留给提示
+  const top = 70, bottom = 70;                 // 上面留给 HUD，下面留给提示和按钮
   const availW = W - 40, availH = H - top - bottom;
   cell = Math.min(availW / cols, availH / rows, 110);
   ox = (W - cols * cell) / 2;
@@ -256,6 +478,7 @@ function tapSheep(s) {
   if (hoverSheep === s) hoverSheep = null;
   const [dr, dc] = DIRS[s.d];
   dashers.push({ x: s.c + 0.5, y: s.r + 0.5, dx: dc, dy: dr, d: s.d, t: 0, dustT: 0 });
+  saveGame();
 }
 
 function spawnDust(x, y) {
@@ -306,6 +529,7 @@ function update(dt) {
   if (state === 'playing' && sheepList.length === 0 && dashers.length === 0) {
     state = 'cleared';
     totalTime += levelTime;
+    saveGame();
     clearTimer = setTimeout(showClear, 600);
   }
 }
@@ -522,24 +746,31 @@ function resize() {
   buildGrass();
 }
 
-function startLevel() {
+// saved 有值时是续上次的进度，没有值就摆一局新的
+function startLevel(saved) {
   const cfg = LEVELS[level - 1];
   rows = cfg.rows;
   cols = cfg.cols;
   layoutBoard();
   buildGrass();
-  let list = null;
-  for (let n = cfg.sheep; !list && n > 0; n--) list = generateLevel({ ...cfg, sheep: n });
+  let list = saved ? restoreBoard(saved) : null;
+  if (!list && cfg.layout) {
+    const made = parseLayout(cfg.layout);
+    board = made.grid;
+    list = made.list;
+  }
+  for (let n = cfg.sheep; !list && n > 0; n--) list = makeBoard({ ...cfg, sheep: n });
   sheepList = list || [];
   dashers = [];
   particles = [];
   hoverSheep = null;
-  levelTime = 0;
+  levelTime = saved ? (Number(saved.levelTime) || 0) : 0;
   state = 'playing';
   clearTimeout(clearTimer);
   overlay.classList.remove('show');
-  hint.classList.toggle('show', level === 1);
-  showBanner(`第 ${level} 关`);
+  hint.classList.toggle('show', level === 1 && !saved);
+  showBanner(saved ? `继续第 ${level} 关` : `第 ${level} 关`);
+  saveGame();
 }
 
 // 下一关；通关最后一关之后，再玩就从第 1 关重新开始
@@ -551,7 +782,15 @@ function advance() {
     level = 1;
     totalTime = 0;
   }
-  startLevel();
+  startLevel(null);
+}
+
+// 重新开始：从第 1 关开始，原来的存档会被覆盖
+function resetGame() {
+  clearTimeout(clearTimer);
+  level = 1;
+  totalTime = 0;
+  startLevel(null);
 }
 
 function showClear() {
@@ -565,6 +804,26 @@ function showClear() {
     nextBtn.textContent = '再玩一次';
   }
   overlay.classList.add('show');
+}
+
+// 打开页面时：有存档就接着玩；上次那一关已经过了（只是没点下一关）就直接进下一关
+function resumeOrStart() {
+  const saved = loadGame();
+  if (saved && saved.cleared) {
+    level = saved.level + 1;
+    totalTime = Number(saved.totalTime) || 0;
+    if (!LEVELS[level - 1]) {
+      level = 1;
+      totalTime = 0;
+    }
+    startLevel(null);
+  } else if (saved) {
+    level = saved.level;
+    totalTime = Number(saved.totalTime) || 0;
+    startLevel(saved);
+  } else {
+    startLevel(null);
+  }
 }
 
 function loop(now) {
@@ -595,6 +854,10 @@ canvas.addEventListener('pointermove', (e) => {
 
 nextBtn.addEventListener('click', advance);
 
+resetBtn.addEventListener('click', () => {
+  if (confirm('要从第 1 关重新开始吗？现在的进度会被清除。')) resetGame();
+});
+
 window.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && state === 'cleared' && overlay.classList.contains('show')) {
     e.preventDefault();
@@ -602,10 +865,21 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// 每 5 秒存一次进度，关页面或切走时也存一次，用时才不会丢太多
+setInterval(() => {
+  if (state === 'playing') saveGame();
+}, 5000);
+window.addEventListener('pagehide', () => {
+  if (state === 'playing') saveGame();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'playing') saveGame();
+});
+
 window.addEventListener('resize', resize);
 
 resize();
-startLevel();
+resumeOrStart();
 requestAnimationFrame(loop);
 </script>
 </body>
