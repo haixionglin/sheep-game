@@ -29,7 +29,7 @@
     right: 0;
     text-align: center;
     color: #fff;
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     pointer-events: none;
@@ -54,7 +54,7 @@
     right: 0;
     text-align: center;
     color: #fff;
-    font-size: 56px;
+    font-size: 52px;
     font-weight: 800;
     text-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
     pointer-events: none;
@@ -74,7 +74,8 @@
     right: 16px;
     text-align: center;
     color: #fff;
-    font-size: 17px;
+    font-size: 16px;
+    line-height: 1.5;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     pointer-events: none;
     opacity: 0;
@@ -88,26 +89,29 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0, 0, 0, 0.4);
     color: #fff;
+    padding: 20px;
+    box-sizing: border-box;
+    text-align: center;
   }
   #overlay.show { display: flex; }
   #overlay h1 {
     margin: 0 0 12px;
-    font-size: 60px;
+    font-size: 54px;
     text-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
   }
   #overlay p {
     margin: 0 0 28px;
-    font-size: 20px;
+    font-size: 19px;
   }
   #nextBtn {
-    padding: 12px 40px;
+    padding: 12px 36px;
     border: none;
     border-radius: 999px;
     background: #ffb400;
     color: #5a3b00;
-    font-size: 22px;
+    font-size: 21px;
     font-weight: 700;
     cursor: pointer;
     box-shadow: 0 5px 0 #c98a00;
@@ -123,11 +127,11 @@
 <div id="hud"></div>
 <button id="resetBtn" type="button">重新开始</button>
 <div id="banner"></div>
-<div id="hint">点小羊，它会朝自己面对的方向冲出去；被挡住的羊冲不出去</div>
+<div id="hint"></div>
 <div id="overlay">
   <h1 id="overlayTitle"></h1>
   <p id="overlayText"></p>
-  <button id="nextBtn"></button>
+  <button id="nextBtn" type="button"></button>
 </div>
 <script>
 const canvas = document.getElementById('game');
@@ -142,156 +146,626 @@ const nextBtn = document.getElementById('nextBtn');
 const resetBtn = document.getElementById('resetBtn');
 
 const SAVE_KEY = 'sheep-game-save-v1';
+const TOP = 70, BOTTOM = 70;          // 上面留给 HUD，下面留给提示和按钮
+const MIN_CELL = 34, MAX_CELL = 110;  // 格子最小 34px：放不下的棋盘可以拖动
 
-// 20 关。第 1–10 关是随机摆局；第 11–20 关是设计好的固定棋盘（layout）
-// layout 符号：'.' 空地，'#' 栅栏，'^' '>' 'v' '<' 是羊（箭头就是它朝的方向）
+// 50 关。layout：'.' 空地，'#' 栅栏，'^' '>' 'v' '<' 是羊（箭头就是它朝的方向）
+// wolves：狼沿矩形 rect=[r1,c1,r2,c2] 的边缘巡逻，off 是开局时狼在路线上的位置
+// 每成功冲出一只羊，狼走一步；狼走到还没走的羊那里，羊就被吃掉，你输了
 const LEVELS = [
-  { rows: 4, cols: 4, sheep: 4,  fences: 0,  theme: 0 },
-  { rows: 4, cols: 5, sheep: 6,  fences: 1,  theme: 0 },
-  { rows: 5, cols: 5, sheep: 8,  fences: 2,  theme: 0 },
-  { rows: 5, cols: 6, sheep: 10, fences: 3,  theme: 1 },
-  { rows: 6, cols: 6, sheep: 12, fences: 4,  theme: 1 },
-  { rows: 6, cols: 7, sheep: 15, fences: 5,  theme: 1 },
-  { rows: 7, cols: 7, sheep: 18, fences: 6,  theme: 2 },
-  { rows: 7, cols: 8, sheep: 21, fences: 7,  theme: 2 },
-  { rows: 8, cols: 8, sheep: 24, fences: 8,  theme: 2 },
-  { rows: 8, cols: 9, sheep: 28, fences: 9,  theme: 2 },
-  { theme: 2, layout: [  // 第 11 关
-    '^...<<..<',
-    '^...<^>v.',
-    '^vv<..^v<',
-    '.v.<^#.v#',
-    '...^^..<.',
-    '#.v.^#..#',
-    '#vv.^#..#',
-    '..v...^.#',
-    '#>>>....>',
-  ] },
-  { theme: 2, layout: [  // 第 12 关
-    '##....##.',
-    '..<<>...v',
-    '##.^..#.v',
-    '#..^^#v>v',
-    '#.^..#vv.',
-    'vv.^>vv..',
-    '.vv..v.<<',
-    'v.v^<.<<.',
-    '>>>^.>...',
-  ] },
-  { theme: 2, layout: [  // 第 13 关
-    '#.#>.>.>v.',
-    '#.#....^v#',
-    '...v.>>>v.',
-    '>>>.>.>>v.',
-    '...v....v#',
-    '.^.>>.^^v.',
-    '##v.^..^>v',
-    '.#..^v.#.v',
-    '##>.^>v>.v',
-  ] },
-  { theme: 3, layout: [  // 第 14 关
-    '.v<<..<<<.',
-    '.v^...<..<',
-    '#...##.#^^',
-    '>.......v.',
-    'vv##.#>..^',
-    '.>>>vv....',
-    '.>v>>>.vv.',
-    'v<<.<..<v#',
-    'vv.#v.#.v#',
-    'v<..<...<#',
-  ] },
-  { theme: 3, layout: [  // 第 15 关
-    '.v.##...#.',
-    '^<.<<.<##.',
-    '^v<##...>v',
-    '..^<v<..<<',
-    '.v<#..^##.',
-    '^.<..<#>v.',
-    '.>..>.>>.v',
-    '^>>.>..v>v',
-    '^v##.>.v..',
-    '^<.....<<<',
-  ] },
-  { theme: 3, layout: [  // 第 16 关
-    '<<<<<<<<<<',
-    '.^^<^>^..^',
-    '^.>>.>.>>^',
-    '>>^.>.^...',
-    '^^...##...',
-    '^^<..##.#^',
-    '..^<#>.^.^',
-    '^<<.<<<##.',
-    '^^.#....#.',
-    '#....#..#.',
-  ] },
-  { theme: 3, layout: [  // 第 17 关
-    '..>.>>..>>',
-    '>.^v^>>>^.',
-    '^v^..##>>^',
-    '....>..>^^',
-    '^<^v<.<..<',
-    '#>^v>..>>^',
-    '..^v###..^',
-    '#.^v.####^',
-    '..^<.<<#.^',
-    '....#.#>.^',
-  ] },
-  { theme: 3, layout: [  // 第 18 关
-    '.v<.v<<##.',
-    '....v<<#v^',
-    '>..>.^^.v^',
-    '.v<<v<<.>^',
-    'vv^#.###.^',
-    '.v..v###v.',
-    '....v##..^',
-    'vv^#>..>.^',
-    '..^<<.<#v^',
-    '>>>..>>.>^',
-  ] },
-  { theme: 3, layout: [  // 第 19 关
-    '.##>>>v...',
-    'v<.^..v#.#',
-    '..#>.>>>>v',
-    '...^<^.<<v',
-    '..###..>^.',
-    '...##v.##v',
-    'v<..v<<<<<',
-    'v##v>>.v>v',
-    'v<..v<<v#v',
-    'v<<<<..<<<',
-  ] },
-  { theme: 3, layout: [  // 第 20 关
-    '^<.#>>v...',
-    '^<>v^>vv..',
-    '^.v.^..<.#',
-    '^<<v.^v.##',
-    '^^<...>v..',
-    '^<v>>^.v..',
-    '^<v.<<vv##',
-    '^..v##.v##',
-    '^..v<<<<<#',
-    '^<<<##..##',
-  ] },
+  { theme: 0, layout: [  // 第 1 关：5x5，羊 6，栅栏 2，狼 0
+    '#....',
+    '.^>.v',
+    '.....',
+    '#....',
+    '.^<.<',
+  ], wolves: [] },
+  { theme: 0, layout: [  // 第 2 关：5x5，羊 6，栅栏 2，狼 0
+    '#....',
+    '.^>.v',
+    '.....',
+    '#....',
+    '.^<.<',
+  ], wolves: [] },
+  { theme: 0, layout: [  // 第 3 关：6x6，羊 9，栅栏 3，狼 0
+    '#....v',
+    '..#...',
+    '..v<.<',
+    '.#v...',
+    '..>v..',
+    'v..<..',
+  ], wolves: [] },
+  { theme: 0, layout: [  // 第 4 关：6x6，羊 9，栅栏 3，狼 1
+    '#...#v',
+    '.^....',
+    '..v.<<',
+    '....#.',
+    '...v..',
+    '.^<>..',
+  ], wolves: [{ rect: [0, 1, 1, 2], off: 2 }] },
+  { theme: 0, layout: [  // 第 5 关：6x6，羊 9，栅栏 3，狼 1
+    '....#v',
+    '#^....',
+    '..v.<<',
+    '....#.',
+    '...v..',
+    '.^<>..',
+  ], wolves: [{ rect: [0, 1, 1, 2], off: 2 }] },
+  { theme: 0, layout: [  // 第 6 关：6x6，羊 9，栅栏 3，狼 1
+    '...##v',
+    '.^....',
+    '..v.<<',
+    '....#.',
+    '...v..',
+    '.^<>..',
+  ], wolves: [{ rect: [0, 1, 1, 2], off: 2 }] },
+  { theme: 0, layout: [  // 第 7 关：7x7，羊 13，栅栏 4，狼 1
+    '...v<#.',
+    '.....v.',
+    '#..v^v.',
+    '....^<>',
+    '.......',
+    '.#...v^',
+    '..#>..^',
+  ], wolves: [{ rect: [5, 4, 6, 5], off: 0 }] },
+  { theme: 0, layout: [  // 第 8 关：7x7，羊 13，栅栏 4，狼 1
+    '...v<#.',
+    '.....v.',
+    '#..v^v.',
+    '....^<>',
+    '.......',
+    '.#...v^',
+    '..#>..^',
+  ], wolves: [{ rect: [5, 4, 6, 5], off: 0 }] },
+  { theme: 0, layout: [  // 第 9 关：7x7，羊 13，栅栏 4，狼 2
+    '...v<..',
+    '.^...<.',
+    '..>.^..',
+    'v.#..^#',
+    'v.....#',
+    '...>>^.',
+    'v.....#',
+  ], wolves: [{ rect: [1, 0, 2, 1], off: 0 }, { rect: [0, 5, 1, 6], off: 0 }] },
+  { theme: 0, layout: [  // 第 10 关：7x7，羊 13，栅栏 4，狼 2
+    '...v<..',
+    '.^...<.',
+    '..>.^..',
+    'v.#..^#',
+    'v#.....',
+    '...>>^.',
+    'v.....#',
+  ], wolves: [{ rect: [1, 0, 2, 1], off: 0 }, { rect: [0, 5, 1, 6], off: 0 }] },
+  { theme: 1, layout: [  // 第 11 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^.',
+    '.#.v....',
+    '.#.v..^.',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '#..>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 12 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^.',
+    '.#.v....',
+    '...v..^#',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '#..>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 13 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^.',
+    '.#.v....',
+    '#..v..^.',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '..#>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 14 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^.',
+    '.##v...#',
+    '...v..^.',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '...>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 15 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^#',
+    '.#.v...#',
+    '...v..^.',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '...>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 16 关：8x8，羊 17，栅栏 5，狼 2
+    '...v<.<.',
+    '.#....^.',
+    '.#.v...#',
+    '...v..^.',
+    '.v<..v^#',
+    '....<...',
+    '.>....^.',
+    '..#>>v..',
+  ], wolves: [{ rect: [4, 4, 5, 5], off: 2 }, { rect: [2, 4, 4, 5], off: 0 }] },
+  { theme: 1, layout: [  // 第 17 关：9x9，羊 22，栅栏 6，狼 2
+    '....#.##.',
+    '..#>...>v',
+    '.>.^.v>..',
+    '>.>.v....',
+    '.^.......',
+    '.^..<..>v',
+    '....v<...',
+    '^##.v....',
+    '...^<.v..',
+  ], wolves: [{ rect: [7, 5, 8, 6], off: 1 }, { rect: [4, 7, 7, 8], off: 3 }] },
+  { theme: 1, layout: [  // 第 18 关：9x9，羊 22，栅栏 6，狼 2
+    '..#...##.',
+    '..#>...>v',
+    '.>.^.v>..',
+    '>.>.v....',
+    '.^.......',
+    '.^..<..>v',
+    '....v<...',
+    '^##.v....',
+    '...^<.v..',
+  ], wolves: [{ rect: [7, 5, 8, 6], off: 1 }, { rect: [4, 7, 7, 8], off: 3 }] },
+  { theme: 1, layout: [  // 第 19 关：9x9，羊 22，栅栏 6，狼 3
+    '..##...v.',
+    'v.....<..',
+    '.v..v.^<#',
+    '>>.>..>>v',
+    '..#.v....',
+    '.>..>.^..',
+    '..<v....<',
+    '.......>.',
+    '....<##..',
+  ], wolves: [{ rect: [6, 6, 7, 7], off: 3 }, { rect: [7, 2, 8, 4], off: 4 }, { rect: [6, 2, 7, 3], off: 3 }] },
+  { theme: 1, layout: [  // 第 20 关：9x9，羊 22，栅栏 6，狼 3
+    '..##...v.',
+    'v.....<..',
+    '.v..v.^<#',
+    '>>.>..>>v',
+    '..#.v....',
+    '.>..>.^..',
+    '..<v....<',
+    '.......>.',
+    '....<##..',
+  ], wolves: [{ rect: [6, 6, 7, 7], off: 3 }, { rect: [7, 2, 8, 4], off: 4 }, { rect: [6, 2, 7, 3], off: 3 }] },
+  { theme: 2, layout: [  // 第 21 关：9x9，羊 23，栅栏 6，狼 3
+    '.>.v...>.',
+    '>^>...>^.',
+    '...v#>^..',
+    '..^<#^.>.',
+    '.....^...',
+    '.........',
+    '^#....>..',
+    '^.#.#^..#',
+    '^..>.^...',
+  ], wolves: [{ rect: [3, 7, 4, 8], off: 1 }, { rect: [5, 4, 6, 6], off: 2 }, { rect: [2, 6, 4, 8], off: 2 }] },
+  { theme: 2, layout: [  // 第 22 关：10x10，羊 28，栅栏 8，狼 3
+    '....^<..<<',
+    'v...<..<.^',
+    '.........^',
+    '<...##....',
+    '.....#..#.',
+    '.^^..#>^..',
+    '>..>..>>v^',
+    'v<......<.',
+    '>...>>...^',
+    '.#.^.#.#..',
+  ], wolves: [{ rect: [5, 1, 6, 2], off: 2 }, { rect: [2, 0, 3, 1], off: 2 }, { rect: [2, 1, 3, 2], off: 1 }] },
+  { theme: 2, layout: [  // 第 23 关：10x10，羊 28，栅栏 8，狼 3
+    '....^<..<<',
+    'v...<..<.^',
+    '.........^',
+    '<...##....',
+    '.....#..#.',
+    '.^^..#>^..',
+    '>..>..>>v^',
+    'v<......<.',
+    '>...>>...^',
+    '.#.^.#.#..',
+  ], wolves: [{ rect: [5, 1, 6, 2], off: 2 }, { rect: [2, 0, 3, 1], off: 2 }, { rect: [2, 1, 3, 2], off: 1 }] },
+  { theme: 2, layout: [  // 第 24 关：10x10，羊 28，栅栏 8，狼 3
+    '....^<..<<',
+    'v...<..<.^',
+    '.........^',
+    '<...##....',
+    '.....#..#.',
+    '.^^..#>^..',
+    '>..>..>>v^',
+    'v<......<.',
+    '>...>>...^',
+    '.#.^.#.#..',
+  ], wolves: [{ rect: [5, 1, 6, 2], off: 2 }, { rect: [2, 0, 3, 1], off: 2 }, { rect: [2, 1, 3, 2], off: 1 }] },
+  { theme: 2, layout: [  // 第 25 关：10x10，羊 28，栅栏 8，狼 3
+    '....^<..<<',
+    'v...<..<.^',
+    '.........^',
+    '<...##....',
+    '.....#..#.',
+    '.^^..#>^..',
+    '>..>..>>v^',
+    'v<......<.',
+    '>...>>...^',
+    '.#.^.#.#..',
+  ], wolves: [{ rect: [5, 1, 6, 2], off: 2 }, { rect: [2, 0, 3, 1], off: 2 }, { rect: [2, 1, 3, 2], off: 1 }] },
+  { theme: 2, layout: [  // 第 26 关：10x10，羊 29，栅栏 8，狼 3
+    '..v<<.<.<.',
+    '...v.v<.<<',
+    '#.......#.',
+    '<.<v.<....',
+    '..>....v.^',
+    '..vv....#.',
+    '.^.v#....#',
+    '#.....^..#',
+    '#..>....>v',
+    '.^.<..<..<',
+  ], wolves: [{ rect: [3, 0, 4, 1], off: 2 }, { rect: [6, 1, 7, 2], off: 1 }, { rect: [3, 7, 4, 8], off: 2 }] },
+  { theme: 2, layout: [  // 第 27 关：10x10，羊 29，栅栏 8，狼 3
+    '..v<<.<.<.',
+    '...v.v<.<<',
+    '#......##.',
+    '<.<v.<....',
+    '..>....v.^',
+    '..vv....#.',
+    '.^.v#....#',
+    '......^.##',
+    '...>....>v',
+    '.^.<..<..<',
+  ], wolves: [{ rect: [3, 0, 4, 1], off: 2 }, { rect: [6, 1, 7, 2], off: 1 }, { rect: [3, 7, 4, 8], off: 2 }] },
+  { theme: 2, layout: [  // 第 28 关：11x11，羊 35，栅栏 10，狼 3
+    'v<###v>..v.',
+    'v^...<..#..',
+    'v.##..^.#v.',
+    '>..>v.^..v.',
+    '...#.......',
+    'v<<.<<^<...',
+    '>>.v.v^..v.',
+    '......##...',
+    '....v......',
+    '...v.v...<.',
+    '.....>....^',
+  ], wolves: [{ rect: [9, 1, 10, 2], off: 3 }, { rect: [6, 2, 8, 3], off: 3 }, { rect: [8, 3, 9, 4], off: 2 }] },
+  { theme: 2, layout: [  // 第 29 关：11x11，羊 35，栅栏 10，狼 3
+    'v<###v>..v.',
+    'v^...<..#..',
+    'v.##..^.#v.',
+    '>..>v.^..v.',
+    '...........',
+    'v<<.<<^<...',
+    '>>.v.v^..v.',
+    '......###..',
+    '....v......',
+    '...v.v...<.',
+    '.....>....^',
+  ], wolves: [{ rect: [9, 1, 10, 2], off: 3 }, { rect: [6, 2, 8, 3], off: 3 }, { rect: [8, 3, 9, 4], off: 2 }] },
+  { theme: 2, layout: [  // 第 30 关：11x11，羊 35，栅栏 10，狼 3
+    'v<###v>..v.',
+    'v^...<..#..',
+    'v.##..^.#v.',
+    '>..>v.^..v.',
+    '...........',
+    'v<<.<<^<...',
+    '>>.v.v^..v.',
+    '......###..',
+    '....v......',
+    '...v.v...<.',
+    '.....>....^',
+  ], wolves: [{ rect: [9, 1, 10, 2], off: 3 }, { rect: [6, 2, 8, 3], off: 3 }, { rect: [8, 3, 9, 4], off: 2 }] },
+  { theme: 3, layout: [  // 第 31 关：11x11，羊 35，栅栏 10，狼 3
+    'v<###v>..v.',
+    'v^...<..#..',
+    'v.##..^.#v.',
+    '>..>v.^..v.',
+    '...........',
+    'v<<.<<^<#..',
+    '>>.v.v^..v.',
+    '......##...',
+    '....v......',
+    '...v.v...<.',
+    '.....>....^',
+  ], wolves: [{ rect: [9, 1, 10, 2], off: 3 }, { rect: [6, 2, 8, 3], off: 3 }, { rect: [8, 3, 9, 4], off: 2 }] },
+  { theme: 3, layout: [  // 第 32 关：11x11，羊 36，栅栏 10，狼 3
+    '.v......<..',
+    'v..<...<...',
+    '.v<^..v.<..',
+    '.......^..<',
+    'v..^....##.',
+    'v>.>.>>.>.^',
+    '>v....>v...',
+    '..^<.<<v..#',
+    '<..##...###',
+    '..<#...>v..',
+    '.....v..<.#',
+  ], wolves: [{ rect: [8, 0, 10, 1], off: 2 }, { rect: [8, 1, 9, 2], off: 0 }, { rect: [0, 5, 1, 6], off: 3 }] },
+  { theme: 3, layout: [  // 第 33 关：11x11，羊 36，栅栏 10，狼 4
+    '>..>.v..>..',
+    '^>.>v...^..',
+    '.^......^..',
+    '^^#......#.',
+    '.^<<.<>...v',
+    '.....v..^.<',
+    '^.>>>.^....',
+    '.##...##^#.',
+    '^..<.>.v^..',
+    '#.#.>..v..>',
+    '#..........',
+  ], wolves: [{ rect: [9, 6, 10, 7], off: 2 }, { rect: [9, 7, 10, 10], off: 2 }, { rect: [9, 4, 10, 6], off: 1 }, { rect: [2, 3, 3, 4], off: 0 }] },
+  { theme: 3, layout: [  // 第 34 关：12x12，羊 43，栅栏 12，狼 4
+    'v<.v.v.<<.<#',
+    'v^..<v<.#...',
+    '.....v.<.<^.',
+    '......^.#.##',
+    'v..v^v.<<..#',
+    '.>..^...v>..',
+    'v.<.^<^.<...',
+    '..#v........',
+    '>>>....>v...',
+    '.^.<...>....',
+    '.......<...#',
+    '..#.#....#.#',
+  ], wolves: [{ rect: [2, 2, 3, 3], off: 2 }, { rect: [9, 7, 10, 8], off: 1 }, { rect: [5, 9, 6, 10], off: 3 }, { rect: [1, 2, 3, 3], off: 2 }] },
+  { theme: 3, layout: [  // 第 35 关：12x12，羊 43，栅栏 12，狼 4
+    'v<.v.v.<<.<.',
+    'v^..<v<.#...',
+    '.....v.<.<^.',
+    '......^.#.##',
+    'v..v^v.<<..#',
+    '.>..^...v>..',
+    'v.<.^<^.<...',
+    '..#v..#.....',
+    '>>>....>v...',
+    '.^.<...>....',
+    '.......<...#',
+    '..#.#....#.#',
+  ], wolves: [{ rect: [2, 2, 3, 3], off: 2 }, { rect: [9, 7, 10, 8], off: 1 }, { rect: [5, 9, 6, 10], off: 3 }, { rect: [1, 2, 3, 3], off: 2 }] },
+  { theme: 3, layout: [  // 第 36 关：12x12，羊 43，栅栏 12，狼 4
+    'v<.v.v.<<.<.',
+    'v^..<v<.#...',
+    '.....v.<.<^.',
+    '......^.#.##',
+    'v..v^v.<<..#',
+    '.>..^...v>..',
+    'v.<.^<^.<...',
+    '..#v...#....',
+    '>>>....>v...',
+    '.^.<...>....',
+    '.......<...#',
+    '..#.#....#.#',
+  ], wolves: [{ rect: [2, 2, 3, 3], off: 2 }, { rect: [9, 7, 10, 8], off: 1 }, { rect: [5, 9, 6, 10], off: 3 }, { rect: [1, 2, 3, 3], off: 2 }] },
+  { theme: 3, layout: [  // 第 37 关：12x12，羊 43，栅栏 12，狼 4
+    'v<.v.v.<<.<.',
+    'v^..<v<.#...',
+    '.....v.<.<^.',
+    '......^.#.##',
+    'v..v^v.<<..#',
+    '.>..^...v>..',
+    'v.<.^<^.<...',
+    '..#v.......#',
+    '>>>....>v...',
+    '.^.<...>....',
+    '.......<...#',
+    '..#.#....#.#',
+  ], wolves: [{ rect: [2, 2, 3, 3], off: 2 }, { rect: [9, 7, 10, 8], off: 1 }, { rect: [5, 9, 6, 10], off: 3 }, { rect: [1, 2, 3, 3], off: 2 }] },
+  { theme: 3, layout: [  // 第 38 关：12x12，羊 44，栅栏 12，狼 4
+    'v<...#......',
+    '......v....<',
+    'v...##....#^',
+    '....##v.....',
+    '.^..v<.<.<<.',
+    '..>.>..>.>.^',
+    'v^...v<#.#.#',
+    '....v>>>>v..',
+    'v....v.#.v..',
+    '....<.<..v#.',
+    '>>>......>v.',
+    '.^.<....<<v#',
+  ], wolves: [{ rect: [8, 3, 9, 6], off: 0 }, { rect: [1, 8, 3, 9], off: 3 }, { rect: [6, 2, 8, 4], off: 0 }, { rect: [8, 3, 9, 5], off: 3 }] },
+  { theme: 3, layout: [  // 第 39 关：12x12，羊 44，栅栏 12，狼 4
+    'v<...#......',
+    '......v....<',
+    'v...##....#^',
+    '....##v.....',
+    '.^..v<.<.<<.',
+    '..>.>..>.>.^',
+    'v^...v<#.##.',
+    '....v>>>>v..',
+    'v....v.#.v..',
+    '....<.<..v#.',
+    '>>>......>v.',
+    '.^.<....<<v#',
+  ], wolves: [{ rect: [8, 3, 9, 6], off: 0 }, { rect: [1, 8, 3, 9], off: 3 }, { rect: [6, 2, 8, 4], off: 0 }, { rect: [8, 3, 9, 5], off: 3 }] },
+  { theme: 3, layout: [  // 第 40 关：12x12，羊 44，栅栏 12，狼 4
+    'v<#..#......',
+    '......v....<',
+    'v...##....#^',
+    '....##v.....',
+    '.^..v<.<.<<.',
+    '..>.>..>.>.^',
+    'v^...v<#.#..',
+    '....v>>>>v..',
+    'v....v.#.v..',
+    '....<.<..v#.',
+    '>>>......>v.',
+    '.^.<....<<v#',
+  ], wolves: [{ rect: [8, 3, 9, 6], off: 0 }, { rect: [1, 8, 3, 9], off: 3 }, { rect: [6, 2, 8, 4], off: 0 }, { rect: [8, 3, 9, 5], off: 3 }] },
+  { theme: 4, layout: [  // 第 41 关：13x13，羊 52，栅栏 14，狼 4
+    '.....v..<.<.<',
+    '..>.>..v.>v..',
+    '#..>^.....v..',
+    '..^<.v<....^.',
+    '..#^.v^v#.v.#',
+    '#.#^...v.....',
+    '#..^>...>.v^.',
+    '....#..v....#',
+    '...^......v.#',
+    '...^<.<v#....',
+    '.^.^#v.v.^>v.',
+    '...^.<#>.^...',
+    '.v<.<<.....<#',
+  ], wolves: [{ rect: [10, 0, 11, 1], off: 2 }, { rect: [3, 9, 5, 11], off: 0 }, { rect: [2, 7, 3, 8], off: 3 }, { rect: [7, 1, 8, 2], off: 3 }] },
+  { theme: 4, layout: [  // 第 42 关：13x13，羊 52，栅栏 14，狼 4
+    '.....v..<.<.<',
+    '..>.>..v.>v..',
+    '#..>^.....v..',
+    '..^<.v<....^.',
+    '..#^.v^v#.v.#',
+    '#.#^...v.....',
+    '#..^>...>.v^.',
+    '....#..v....#',
+    '...^......v.#',
+    '...^<.<v#....',
+    '.^.^#v.v.^>v.',
+    '...^.<#>.^...',
+    '.v<.<<.....<#',
+  ], wolves: [{ rect: [10, 0, 11, 1], off: 2 }, { rect: [3, 9, 5, 11], off: 0 }, { rect: [2, 7, 3, 8], off: 3 }, { rect: [7, 1, 8, 2], off: 3 }] },
+  { theme: 4, layout: [  // 第 43 关：13x13，羊 52，栅栏 14，狼 4
+    '.....v..<.<.<',
+    '..>.>..v.>v..',
+    '#..>^.....v..',
+    '..^<.v<....^.',
+    '..#^.v^v#.v.#',
+    '#.#^...v.....',
+    '#..^>...>.v^.',
+    '....#..v....#',
+    '...^......v.#',
+    '...^<.<v#....',
+    '.^.^#v.v.^>v.',
+    '...^.<#>.^...',
+    '.v<.<<.....<#',
+  ], wolves: [{ rect: [10, 0, 11, 1], off: 2 }, { rect: [3, 9, 5, 11], off: 0 }, { rect: [2, 7, 3, 8], off: 3 }, { rect: [7, 1, 8, 2], off: 3 }] },
+  { theme: 4, layout: [  // 第 44 关：13x13，羊 53，栅栏 14，狼 4
+    '##.........#.',
+    '###.#..>v....',
+    'v..<.<......#',
+    '...###..>...v',
+    '.....v.<..<#.',
+    '>.>>>..^....v',
+    'v...v.<vv..<<',
+    'v...v>>.>..v.',
+    '>.vvv........',
+    'v...<.^.<....',
+    '>>.....>v.^v.',
+    '.#....^v.#.v.',
+    '..v...^<>>^>.',
+  ], wolves: [{ rect: [3, 1, 4, 2], off: 1 }, { rect: [8, 9, 9, 11], off: 1 }, { rect: [6, 1, 8, 3], off: 0 }, { rect: [11, 2, 12, 3], off: 1 }] },
+  { theme: 4, layout: [  // 第 45 关：13x13，羊 53，栅栏 14，狼 4
+    '.#.#....##.#.',
+    '##..#..>v....',
+    'v..<.<......#',
+    '...###..>...v',
+    '.....v.<..<#.',
+    '>.>>>..^....v',
+    'v...v.<vv..<<',
+    'v...v>>.>..v.',
+    '>.vvv........',
+    'v...<.^.<....',
+    '>>.....>v.^v.',
+    '.#....^v...v.',
+    '..v...^<>>^>.',
+  ], wolves: [{ rect: [3, 1, 4, 2], off: 1 }, { rect: [8, 9, 9, 11], off: 1 }, { rect: [6, 1, 8, 3], off: 0 }, { rect: [11, 2, 12, 3], off: 1 }] },
+  { theme: 4, layout: [  // 第 46 关：13x13，羊 53，栅栏 14，狼 4
+    '##..##.....#.',
+    '##..#..>v....',
+    'v..<.<......#',
+    '...###..>...v',
+    '.....v.<..<#.',
+    '>.>>>..^....v',
+    'v...v.<vv..<<',
+    'v...v>>.>..v.',
+    '>.vvv........',
+    'v...<.^.<....',
+    '>>.....>v.^v.',
+    '.#....^v...v.',
+    '..v...^<>>^>.',
+  ], wolves: [{ rect: [3, 1, 4, 2], off: 1 }, { rect: [8, 9, 9, 11], off: 1 }, { rect: [6, 1, 8, 3], off: 0 }, { rect: [11, 2, 12, 3], off: 1 }] },
+  { theme: 4, layout: [  // 第 47 关：14x14，羊 62，栅栏 16，狼 4
+    '......v<#.###.',
+    '>>.>>>.>>>>.v.',
+    '......v.>.....',
+    '..^..>.^...>..',
+    '........#.....',
+    '^<.....<.<.<v<',
+    '.#^......^..v.',
+    '.#>.....>^....',
+    '..^.<..<<..<v<',
+    '>.>>>..>>>.>.^',
+    '..#.#.v..#.#.#',
+    '.##..^v.#.#.>.',
+    '^<<<<.<^<..<..',
+    '.....^...<....',
+  ], wolves: [{ rect: [2, 10, 3, 11], off: 3 }, { rect: [2, 9, 4, 11], off: 2 }, { rect: [2, 1, 3, 3], off: 1 }, { rect: [2, 8, 3, 10], off: 2 }] },
+  { theme: 4, layout: [  // 第 48 关：14x14，羊 62，栅栏 16，狼 4
+    '......v<#.###.',
+    '>>.>>>.>>>>.v.',
+    '......v.>.....',
+    '..^..>.^...>..',
+    '........#.....',
+    '^<.....<.<.<v<',
+    '.#^......^..v.',
+    '.#>.....>^....',
+    '..^.<..<<..<v<',
+    '>.>>>..>>>.>.^',
+    '..#.#.v..#.#.#',
+    '.##..^v.#...>.',
+    '^<<<<.<^<..<..',
+    '.....^...<#...',
+  ], wolves: [{ rect: [2, 10, 3, 11], off: 3 }, { rect: [2, 9, 4, 11], off: 2 }, { rect: [2, 1, 3, 3], off: 1 }, { rect: [2, 8, 3, 10], off: 2 }] },
+  { theme: 4, layout: [  // 第 49 关：14x14，羊 62，栅栏 16，狼 4
+    '......v<#.###.',
+    '>>.>>>.>>>>.v.',
+    '......v.>.....',
+    '..^..>.^...>..',
+    '........#.....',
+    '^<.....<.<.<v<',
+    '.#^......^..v.',
+    '.#>.....>^....',
+    '..^.<..<<..<v<',
+    '>.>>>..>>>.>.^',
+    '.##.#.v..#.#.#',
+    '.##..^v.#...>.',
+    '^<<<<.<^<..<..',
+    '.....^...<....',
+  ], wolves: [{ rect: [2, 10, 3, 11], off: 3 }, { rect: [2, 9, 4, 11], off: 2 }, { rect: [2, 1, 3, 3], off: 1 }, { rect: [2, 8, 3, 10], off: 2 }] },
+  { theme: 4, layout: [  // 第 50 关：14x14，羊 63，栅栏 16，狼 4
+    '....v<<.#...>v',
+    '#.....#.....^v',
+    '##>..v.>....^.',
+    '..^<<.v<<<<<^.',
+    '....v.v>>>.^..',
+    '#..#........^v',
+    '.###.v.^.>>v^v',
+    '>>..v>>.....^v',
+    '#........^...v',
+    '...vv..^#.....',
+    '.##.v..^...>.v',
+    '.......^<..<<>',
+    '#.v.>....>^...',
+    '..<....^....#.',
+  ], wolves: [{ rect: [12, 1, 13, 3], off: 3 }, { rect: [8, 1, 9, 3], off: 1 }, { rect: [7, 10, 10, 11], off: 6 }, { rect: [11, 5, 13, 6], off: 1 }] },
 ];
-// 第 11–20 关：行列、羊数、栅栏数都从棋盘上数出来
-for (const cfg of LEVELS) {
-  if (cfg.layout) {
-    cfg.rows = cfg.layout.length;
-    cfg.cols = cfg.layout[0].length;
-    cfg.sheep = cfg.layout.join('').replace(/[.#]/g, '').length;
-    cfg.fences = cfg.layout.join('').replace(/[^#]/g, '').length;
-  }
-}
+
 // 背景配色：top / bottom 是渐变色，dark 是草丛和色块的深色（RGB）
 const THEMES = [
   { top: '#9bdc8a', bottom: '#6bb65a', dark: '30,100,30' },   // 春天
   { top: '#ebe196', bottom: '#bfae5e', dark: '110,90,30' },   // 秋天
   { top: '#93b9ad', bottom: '#4f7f58', dark: '20,55,40' },    // 傍晚
   { top: '#8fa9b8', bottom: '#56707f', dark: '25,45,60' },    // 月夜
+  { top: '#e4f1f8', bottom: '#b7d4e4', dark: '70,100,130' },  // 雪地
 ];
+
 // 方向：0 上、1 右、2 下、3 左；每个方向对应的 [行变化, 列变化]
 const DIRS = [[-1, 0], [0, 1], [1, 0], [0, -1]];
+const ARROW_DIR = { '^': 0, '>': 1, 'v': 2, '<': 3 };
 // 羊毛的圆圈（单位是“一格”的比例；羊先朝右画，再旋转到实际朝向）
 const WOOL = [{ x: 0, y: 0, r: 0.2 }];
 for (let i = 0; i < 8; i++) {
@@ -299,29 +773,54 @@ for (let i = 0; i < 8; i++) {
   WOOL.push({ x: Math.cos(a) * 0.19, y: Math.sin(a) * 0.16, r: 0.14 });
 }
 
+// 关卡的行列、羊数、栅栏数都从棋盘上数出来
+for (const cfg of LEVELS) {
+  cfg.rows = cfg.layout.length;
+  cfg.cols = cfg.layout[0].length;
+  cfg.sheep = cfg.layout.join('').replace(/[.#]/g, '').length;
+  cfg.fences = cfg.layout.join('').replace(/[^#]/g, '').length;
+}
+const FIRST_WOLF_LEVEL = LEVELS.findIndex((c) => c.wolves && c.wolves.length) + 1;
+
+// 矩形边缘，顺时针，从左上角开始（和设计工具里的顺序一致）
+function perimeter(r1, c1, r2, c2) {
+  const out = [];
+  for (let c = c1; c <= c2; c++) out.push([r1, c]);
+  for (let r = r1 + 1; r <= r2; r++) out.push([r, c2]);
+  for (let c = c2 - 1; c >= c1; c--) out.push([r2, c]);
+  for (let r = r2 - 1; r > r1; r--) out.push([r, c1]);
+  return out;
+}
+
 let W = 0, H = 0, dpr = 1;
-let cell = 40, ox = 0, oy = 0;   // 一格的大小，棋盘左上角的位置（CSS 像素）
-let rows = 4, cols = 4;
-let grass = null;                // 当前关卡的草地背景
+let cell = 40, ox = 0, oy = 0;   // 一格的大小，棋盘左上角在屏幕上的位置（CSS 像素）
+let rows = 5, cols = 5;
+let grass = null;
 
 let level = 1;
 let board = [];        // board[r][c]：null 空地 | 'F' 栅栏 | 羊对象 { r, c, d, shake }
 let sheepList = [];    // 还留在棋盘上的羊
 let dashers = [];      // 正在冲出去的羊：已经从棋盘移走，只负责播动画
 let particles = [];
+let wolves = [];       // 运行时的狼：{ route, off, cur, from, anim }
+let wolfMap = new Uint8Array(0);
+let turns = 0;         // 已经成功冲出去几只羊（狼走了几步）
+let eaten = null;      // 被狼吃掉的那一格，用来画一个红圈
 let hoverSheep = null;
-let state = 'playing'; // 'playing' 游戏中 | 'cleared' 本关已过
+let state = 'playing'; // 'playing' 游戏中 | 'cleared' 本关已过 | 'lost' 被狼吃掉
 let levelTime = 0;
 let totalTime = 0;     // 已经通过的关卡总用时
-let clearTimer = null;
+let clearTimer = null, loseTimer = null;
+let overlayAction = null;
 let hudText = '';
 let last = performance.now();
+let press = null;      // 当前按下的指针：用来区分“点一下”和“拖动视野”
 
 const fmt = (t) => {
   const s = Math.floor(t);
   return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 };
-const rand = (n) => Math.floor(Math.random() * n);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const inside = (r, c) => r >= 0 && r < rows && c >= 0 && c < cols;
 
 function showBanner(text) {
@@ -331,46 +830,16 @@ function showBanner(text) {
   banner.classList.add('play');
 }
 
-// 从这一格朝 d 方向一直看到棋盘边缘：中间没有栅栏和羊，就能冲出去
+// 从这一格朝 d 方向一直看到棋盘边缘：没有栅栏、没有羊、没有狼，才能冲出去
 function rayClear(r, c, d) {
   const [dr, dc] = DIRS[d];
   for (let rr = r + dr, cc = c + dc; inside(rr, cc); rr += dr, cc += dc) {
-    if (board[rr][cc]) return false;
+    if (board[rr][cc] || wolfMap[rr * cols + cc]) return false;
   }
   return true;
 }
 
-// 第 1–10 关：随机摆一局。先放栅栏，再倒着摆羊（每只羊摆下去时朝向都是通的，所以一定有解）
-function makeBoard(cfg) {
-  const grid = Array.from({ length: rows }, () => new Array(cols).fill(null));
-  board = grid;
-  let placedFences = 0;
-  for (let tries = 0; placedFences < cfg.fences && tries < 1000; tries++) {
-    const r = rand(rows), c = rand(cols);
-    if (!grid[r][c]) { grid[r][c] = 'F'; placedFences++; }
-  }
-  const list = [];
-  while (list.length < cfg.sheep) {
-    const opts = [];
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (grid[r][c]) continue;
-        for (let d = 0; d < 4; d++) {
-          if (rayClear(r, c, d)) opts.push([r, c, d]);
-        }
-      }
-    }
-    if (!opts.length) return null;
-    const [r, c, d] = opts[rand(opts.length)];
-    const s = { r, c, d, shake: 0 };
-    grid[r][c] = s;
-    list.push(s);
-  }
-  return list;
-}
-
-// 第 11 关起：把设计好的棋盘变成格子。'#' 栅栏；'^' '>' 'v' '<' 是羊，d 为 0 上、1 右、2 下、3 左
-const ARROW_DIR = { '^': 0, '>': 1, 'v': 2, '<': 3 };
+// 把 layout 变成棋盘
 function parseLayout(lines) {
   const grid = lines.map((line, r) => [...line].map((ch, c) => {
     if (ch === '#') return 'F';
@@ -386,88 +855,27 @@ function parseLayout(lines) {
   return { grid, list };
 }
 
-// ---------- 存档 ----------
-// 存的是：关卡号、总用时、本关用时、棋盘上的栅栏和羊（位置、朝向）
-function saveGame() {
-  const fences = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (board[r][c] === 'F') fences.push([r, c]);
+// ---------- 狼 ----------
+// 第 t 步时，狼在路线的第 (t + off) % 长度 个格子上
+function refreshWolves(t, animate) {
+  wolfMap = new Uint8Array(rows * cols);
+  for (const w of wolves) {
+    const idx = (t + w.off) % w.route.length;
+    const [r, c] = w.route[idx];
+    if (animate && w.cur) {
+      w.from = w.cur;
+      w.anim = 0;
+    } else {
+      w.from = [r, c];
+      w.anim = 1;
     }
-  }
-  const data = {
-    v: 1,
-    level,
-    totalTime,
-    levelTime,
-    cleared: state === 'cleared',
-    fences,
-    sheep: sheepList.map((s) => [s.r, s.c, s.d]),
-  };
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-  } catch (e) {
-    // 浏览器不让存（比如隐私模式）就算了，游戏照常能玩
+    w.idx = idx;
+    w.cur = [r, c];
+    wolfMap[r * cols + c] = 1;
   }
 }
 
-function loadGame() {
-  try {
-    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
-    if (!data || data.v !== 1 || !LEVELS[data.level - 1]) return null;
-    return data;
-  } catch (e) {
-    return null;
-  }
-}
-
-// 把存档里的棋盘还原出来；存档有问题就返回 null，改为重新摆一局
-function restoreBoard(data) {
-  const cfg = LEVELS[data.level - 1];
-  try {
-    rows = cfg.rows;
-    cols = cfg.cols;
-    const grid = Array.from({ length: rows }, () => new Array(cols).fill(null));
-    const okCell = (r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < rows && c >= 0 && c < cols;
-    for (const [r, c] of data.fences) {
-      if (!okCell(r, c) || grid[r][c]) return null;
-      grid[r][c] = 'F';
-    }
-    const list = [];
-    for (const [r, c, d] of data.sheep) {
-      if (!okCell(r, c) || grid[r][c] || !Number.isInteger(d) || d < 0 || d > 3) return null;
-      const s = { r, c, d, shake: 0 };
-      grid[r][c] = s;
-      list.push(s);
-    }
-    board = grid;
-    return list;
-  } catch (e) {
-    return null;
-  }
-}
-
-function layoutBoard() {
-  const top = 70, bottom = 70;                 // 上面留给 HUD，下面留给提示和按钮
-  const availW = W - 40, availH = H - top - bottom;
-  cell = Math.min(availW / cols, availH / rows, 110);
-  ox = (W - cols * cell) / 2;
-  oy = top + (availH - rows * cell) / 2;
-}
-
-function cellCenter(r, c) {
-  return { x: ox + (c + 0.5) * cell, y: oy + (r + 0.5) * cell };
-}
-
-// 找到被点中的羊（点的是哪一格）
-function sheepAt(x, y) {
-  const c = Math.floor((x - ox) / cell), r = Math.floor((y - oy) / cell);
-  if (!inside(r, c)) return null;
-  const v = board[r][c];
-  return v && v !== 'F' ? v : null;
-}
-
-// 点羊：前面通畅就冲出去，被挡住就原地抖一下
+// 点羊：前面通畅就冲出去，被挡住就原地抖一下。冲出去以后狼走一步
 function tapSheep(s) {
   if (!rayClear(s.r, s.c, s.d)) {
     s.shake = 0.4;
@@ -478,9 +886,29 @@ function tapSheep(s) {
   if (hoverSheep === s) hoverSheep = null;
   const [dr, dc] = DIRS[s.d];
   dashers.push({ x: s.c + 0.5, y: s.r + 0.5, dx: dc, dy: dr, d: s.d, t: 0, dustT: 0 });
+  turns++;
+  refreshWolves(turns, true);
+  // 狼走到的格子上还有没走的羊：羊被吃掉，输了
+  for (const w of wolves) {
+    const [r, c] = w.cur;
+    if (board[r][c] && board[r][c] !== 'F') {
+      loseLevel(r, c);
+      return;
+    }
+  }
   saveGame();
 }
 
+function loseLevel(r, c) {
+  state = 'lost';
+  eaten = { r, c, t: 0 };
+  clearTimeout(loseTimer);
+  loseTimer = setTimeout(() => {
+    showOverlay('被狼吃掉了', `第 ${level} 关失败了：狼踩到了还没走的羊。`, '重新开始本关', () => startLevel(null));
+  }, 800);
+}
+
+// ---------- 画面 ----------
 function spawnDust(x, y) {
   particles.push({
     x: x + (Math.random() - 0.5) * cell * 0.3,
@@ -522,6 +950,8 @@ function updateParticles(dt) {
 function update(dt) {
   if (state === 'playing') levelTime += dt;
   for (const s of sheepList) s.shake = Math.max(0, s.shake - dt);
+  for (const w of wolves) if (w.anim < 1) w.anim = Math.min(1, w.anim + dt / 0.22);
+  if (eaten) eaten.t += dt;
   updateDashers(dt);
   updateParticles(dt);
 
@@ -534,7 +964,6 @@ function update(dt) {
   }
 }
 
-// 栅栏：一块木板
 function drawFence(x, y) {
   ctx.save();
   ctx.translate(x, y);
@@ -553,7 +982,6 @@ function drawFence(x, y) {
 
 // 俯视的小羊：羊毛 + 朝前的黑脑袋 + 四只小腿。先按“一格”的比例画，再旋转到朝向
 function drawSheepTop(x, y, d, shakePx) {
-  // 影子不跟着旋转
   ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
   ctx.beginPath();
   ctx.ellipse(x + shakePx + cell * 0.04, y + cell * 0.05, cell * 0.36, cell * 0.32, 0, 0, Math.PI * 2);
@@ -564,14 +992,12 @@ function drawSheepTop(x, y, d, shakePx) {
   ctx.rotate((d - 1) * Math.PI / 2);   // d=0 朝上，1 朝右，2 朝下，3 朝左
   ctx.scale(cell, cell);
 
-  // 腿
   ctx.fillStyle = '#4a4440';
   for (const [lx, ly] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) {
     ctx.beginPath();
     ctx.arc(lx, ly, 0.07, 0, Math.PI * 2);
     ctx.fill();
   }
-  // 羊毛：先画一层深色描边，再画白色
   ctx.fillStyle = '#cfc9bd';
   for (const p of WOOL) {
     ctx.beginPath();
@@ -584,7 +1010,6 @@ function drawSheepTop(x, y, d, shakePx) {
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
     ctx.fill();
   }
-  // 耳朵、脑袋
   ctx.fillStyle = '#4a4440';
   ctx.beginPath();
   ctx.ellipse(0.22, -0.14, 0.07, 0.04, -0.6, 0, Math.PI * 2);
@@ -595,7 +1020,6 @@ function drawSheepTop(x, y, d, shakePx) {
   ctx.beginPath();
   ctx.ellipse(0.27, 0, 0.15, 0.13, 0, 0, Math.PI * 2);
   ctx.fill();
-  // 眼睛
   ctx.fillStyle = '#fff';
   ctx.beginPath();
   ctx.arc(0.33, -0.06, 0.04, 0, Math.PI * 2);
@@ -609,6 +1033,63 @@ function drawSheepTop(x, y, d, shakePx) {
   ctx.fill();
   ctx.beginPath();
   ctx.arc(0.345, 0.06, 0.02, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// 俯视的狼：灰色身子、尖耳朵、红眼睛、长嘴。朝向就是它下一步要走的方向
+function drawWolfTop(x, y, angle) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.beginPath();
+  ctx.ellipse(x + cell * 0.04, y + cell * 0.05, cell * 0.36, cell * 0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(cell, cell);
+  ctx.fillStyle = '#5b6068';
+  ctx.beginPath();
+  ctx.ellipse(-0.36, 0, 0.12, 0.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3f434a';
+  for (const [lx, ly] of [[-0.18, -0.2], [0.18, -0.2], [-0.18, 0.2], [0.18, 0.2]]) {
+    ctx.beginPath();
+    ctx.arc(lx, ly, 0.07, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#4b4f57';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 0.27, 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#7d838c';
+  ctx.beginPath();
+  ctx.ellipse(-0.02, -0.02, 0.2, 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4b4f57';
+  ctx.beginPath();
+  ctx.moveTo(0.18, -0.12); ctx.lineTo(0.28, -0.25); ctx.lineTo(0.24, -0.06); ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.18, 0.12); ctx.lineTo(0.28, 0.25); ctx.lineTo(0.24, 0.06); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#5a5f67';
+  ctx.beginPath();
+  ctx.ellipse(0.27, 0, 0.13, 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#8b9099';
+  ctx.beginPath();
+  ctx.ellipse(0.37, 0, 0.09, 0.06, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(0.46, 0, 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e53935';
+  ctx.beginPath();
+  ctx.arc(0.3, -0.07, 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(0.3, 0.07, 0.03, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -639,13 +1120,29 @@ function drawBoard() {
   }
 }
 
+// 狼的巡逻路线：虚线
+function drawWolfRoutes() {
+  for (const w of wolves) {
+    const pts = w.route.map(([r, c]) => cellCenter(r, c));
+    ctx.save();
+    ctx.strokeStyle = 'rgba(40, 40, 40, 0.3)';
+    ctx.lineWidth = Math.max(1, cell * 0.05);
+    ctx.setLineDash([cell * 0.14, cell * 0.14]);
+    ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 // 鼠标移到羊上时，画出它会走的路：通畅是白点，被挡住是红色
 function drawPath(s) {
   const clear = rayClear(s.r, s.c, s.d);
   const [dr, dc] = DIRS[s.d];
   for (let rr = s.r + dr, cc = s.c + dc; inside(rr, cc); rr += dr, cc += dc) {
     const p = cellCenter(rr, cc);
-    const blocked = !!board[rr][cc];
+    const blocked = !!board[rr][cc] || !!wolfMap[rr * cols + cc];
     ctx.fillStyle = blocked ? 'rgba(229, 57, 53, 0.9)' : (clear ? 'rgba(255, 255, 255, 0.85)' : 'rgba(229, 57, 53, 0.6)');
     ctx.beginPath();
     ctx.arc(p.x, p.y, cell * 0.08, 0, Math.PI * 2);
@@ -654,17 +1151,28 @@ function drawPath(s) {
   }
 }
 
+// 狼当前位置（从上一格慢慢走到这一格）和朝向（朝着它下一步的方向）
+function wolfDrawPos(w) {
+  const k = w.anim * w.anim * (3 - 2 * w.anim);
+  const fr = w.from, cu = w.cur;
+  const r = fr[0] + (cu[0] - fr[0]) * k + 0.5;
+  const c = fr[1] + (cu[1] - fr[1]) * k + 0.5;
+  const nxt = w.route[(w.idx + 1) % w.route.length];
+  const angle = Math.atan2(nxt[0] - cu[0], nxt[1] - cu[1]);
+  return { x: ox + c * cell, y: oy + r * cell, angle };
+}
+
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(grass, 0, 0);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   drawBoard();
+  drawWolfRoutes();
   if (hoverSheep && state === 'playing' && board[hoverSheep.r][hoverSheep.c] === hoverSheep) {
     drawPath(hoverSheep);
   }
 
-  // 尘土
   ctx.fillStyle = '#f5f2e8';
   for (const p of particles) {
     ctx.globalAlpha = (1 - p.life / p.max) * 0.6;
@@ -674,7 +1182,6 @@ function draw() {
   }
   ctx.globalAlpha = 1;
 
-  // 还在棋盘上的羊
   for (const s of sheepList) {
     const p = cellCenter(s.r, s.c);
     const shakePx = s.shake > 0 ? Math.sin(s.shake * 70) * cell * 0.08 * (s.shake / 0.4) : 0;
@@ -687,10 +1194,33 @@ function draw() {
       ctx.stroke();
     }
   }
-  // 正在冲出去的羊画在最上面
+  for (const w of wolves) {
+    const p = wolfDrawPos(w);
+    drawWolfTop(p.x, p.y, p.angle);
+  }
+  if (eaten && eaten.t < 1.2) {
+    const p = cellCenter(eaten.r, eaten.c);
+    ctx.strokeStyle = `rgba(229, 57, 53, ${1 - eaten.t / 1.2})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, cell * (0.4 + eaten.t * 0.5), 0, Math.PI * 2);
+    ctx.stroke();
+  }
   for (const d of dashers) {
     drawSheepTop(ox + d.x * cell, oy + d.y * cell, d.d, 0);
   }
+}
+
+function cellCenter(r, c) {
+  return { x: ox + (c + 0.5) * cell, y: oy + (r + 0.5) * cell };
+}
+
+// 找到被点中的羊（点的是哪一格）
+function sheepAt(x, y) {
+  const c = Math.floor((x - ox) / cell), r = Math.floor((y - oy) / cell);
+  if (!inside(r, c)) return null;
+  const v = board[r][c];
+  return v && v !== 'F' ? v : null;
 }
 
 // 草地背景：每关换一次配色，每关只画一次，之后每帧直接贴图
@@ -708,14 +1238,12 @@ function buildGrass() {
   g.fillStyle = base;
   g.fillRect(0, 0, W, H);
 
-  // 深浅不一的草地色块
   for (let i = 0; i < (W * H) / 9000; i++) {
     g.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.07)' : `rgba(${th.dark},0.10)`;
     g.beginPath();
     g.arc(Math.random() * W, Math.random() * H, 20 + Math.random() * 60, 0, Math.PI * 2);
     g.fill();
   }
-  // 小草丛
   g.strokeStyle = `rgba(${th.dark},0.45)`;
   g.lineWidth = 2;
   g.lineCap = 'round';
@@ -727,12 +1255,169 @@ function buildGrass() {
     g.moveTo(x + s, y); g.lineTo(x + s / 2, y - s);
   }
   g.stroke();
-  // 小花
   for (let i = 0; i < (W * H) / 25000; i++) {
     g.fillStyle = Math.random() < 0.5 ? '#fff7b0' : '#ffffff';
     g.beginPath();
     g.arc(Math.random() * W, Math.random() * H, 2.5, 0, Math.PI * 2);
     g.fill();
+  }
+}
+
+// 格子大小和棋盘位置：放得下就居中；放不下就靠左上，可以拖动
+function layoutBoard() {
+  const availW = W - 16, availH = H - TOP - BOTTOM;
+  cell = Math.max(MIN_CELL, Math.min(availW / cols, availH / rows, MAX_CELL));
+  clampCam(true);
+}
+
+function clampCam(reset) {
+  const bw = cols * cell, bh = rows * cell, availH = H - TOP - BOTTOM;
+  if (bw > W - 16) {
+    ox = reset ? 8 : clamp(ox, W - 8 - bw, 8);
+  } else {
+    ox = (W - bw) / 2;
+  }
+  if (bh > availH) {
+    oy = reset ? TOP : clamp(oy, H - BOTTOM - bh, TOP);
+  } else {
+    oy = TOP + (availH - bh) / 2;
+  }
+}
+
+// ---------- 存档 ----------
+// 存的是：关卡号、总用时、本关用时、剩下的羊和栅栏。狼的位置由“已经冲出去几只”算出来
+function saveGame() {
+  const fences = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (board[r][c] === 'F') fences.push([r, c]);
+    }
+  }
+  const data = {
+    v: 1,
+    level,
+    totalTime,
+    levelTime,
+    cleared: state === 'cleared',
+    fences,
+    sheep: sheepList.map((s) => [s.r, s.c, s.d]),
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) {
+    // 浏览器不让存（比如隐私模式）就算了，游戏照常能玩
+  }
+}
+
+function loadGame() {
+  try {
+    const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (!data || data.v !== 1 || !LEVELS[data.level - 1]) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 把存档里的棋盘还原出来；存档有问题就返回 null，改为按设计重新开始这一关
+function restoreBoard(data) {
+  const cfg = LEVELS[data.level - 1];
+  try {
+    rows = cfg.rows;
+    cols = cfg.cols;
+    const grid = Array.from({ length: rows }, () => new Array(cols).fill(null));
+    const okCell = (r, c) => Number.isInteger(r) && Number.isInteger(c) && r >= 0 && r < rows && c >= 0 && c < cols;
+    for (const [r, c] of data.fences) {
+      if (!okCell(r, c) || grid[r][c]) return null;
+      grid[r][c] = 'F';
+    }
+    const list = [];
+    for (const [r, c, d] of data.sheep) {
+      if (!okCell(r, c) || grid[r][c] || !Number.isInteger(d) || d < 0 || d > 3) return null;
+      const s = { r, c, d, shake: 0 };
+      grid[r][c] = s;
+      list.push(s);
+    }
+    board = grid;
+    return list;
+  } catch (e) {
+    return null;
+  }
+}
+
+// saved 有值时是续上次的进度，没有值就从这一关的设计开始
+function startLevel(saved) {
+  const cfg = LEVELS[level - 1];
+  rows = cfg.rows;
+  cols = cfg.cols;
+  layoutBoard();
+  buildGrass();
+  let list = saved ? restoreBoard(saved) : null;
+  if (!list) {
+    const made = parseLayout(cfg.layout);
+    board = made.grid;
+    list = made.list;
+  }
+  sheepList = list;
+  turns = cfg.sheep - sheepList.length;
+  wolves = (cfg.wolves || []).map((w) => ({
+    route: perimeter(...w.rect), off: w.off, cur: null, from: null, anim: 1, idx: 0,
+  }));
+  refreshWolves(turns, false);
+  dashers = [];
+  particles = [];
+  hoverSheep = null;
+  eaten = null;
+  levelTime = saved ? (Number(saved.levelTime) || 0) : 0;
+  state = 'playing';
+  clearTimeout(clearTimer);
+  clearTimeout(loseTimer);
+  overlay.classList.remove('show');
+  overlayAction = null;
+  // 提示：第 1 关讲点羊；第一次出现狼的那一关讲狼
+  hudText = '';
+  let tip = '';
+  if (level === 1) tip = '点小羊，它会朝自己面对的方向冲出去；被挡住的羊冲不出去';
+  else if (level === FIRST_WOLF_LEVEL) tip = '狼会沿着虚线巡逻。你每冲出一只羊，狼就走一步；狼踩到还没走的羊，羊就被吃掉。';
+  hint.textContent = tip;
+  hint.classList.toggle('show', !!tip && !saved);
+  showBanner(saved ? `继续第 ${level} 关` : `第 ${level} 关`);
+  saveGame();
+}
+
+function showOverlay(title, text, btn, action) {
+  overlayTitle.textContent = title;
+  overlayText.textContent = text;
+  nextBtn.textContent = btn;
+  overlayAction = action;
+  overlay.classList.add('show');
+}
+
+// 下一关；通关最后一关之后，再玩就从第 1 关重新开始
+function advance() {
+  if (state !== 'cleared') return;
+  if (level < LEVELS.length) level++;
+  else {
+    level = 1;
+    totalTime = 0;
+  }
+  startLevel(null);
+}
+
+// 重新开始：从第 1 关开始，原来的存档会被覆盖
+function resetGame() {
+  clearTimeout(clearTimer);
+  clearTimeout(loseTimer);
+  level = 1;
+  totalTime = 0;
+  startLevel(null);
+}
+
+function showClear() {
+  if (level < LEVELS.length) {
+    showOverlay('过关！', `第 ${level} 关用时 ${fmt(levelTime)}`, '下一关', advance);
+  } else {
+    showOverlay('全部通关！', `${LEVELS.length} 关全部通过，总用时 ${fmt(totalTime)}`, '再玩一次', resetGame);
   }
 }
 
@@ -744,66 +1429,6 @@ function resize() {
   canvas.height = Math.round(H * dpr);
   layoutBoard();
   buildGrass();
-}
-
-// saved 有值时是续上次的进度，没有值就摆一局新的
-function startLevel(saved) {
-  const cfg = LEVELS[level - 1];
-  rows = cfg.rows;
-  cols = cfg.cols;
-  layoutBoard();
-  buildGrass();
-  let list = saved ? restoreBoard(saved) : null;
-  if (!list && cfg.layout) {
-    const made = parseLayout(cfg.layout);
-    board = made.grid;
-    list = made.list;
-  }
-  for (let n = cfg.sheep; !list && n > 0; n--) list = makeBoard({ ...cfg, sheep: n });
-  sheepList = list || [];
-  dashers = [];
-  particles = [];
-  hoverSheep = null;
-  levelTime = saved ? (Number(saved.levelTime) || 0) : 0;
-  state = 'playing';
-  clearTimeout(clearTimer);
-  overlay.classList.remove('show');
-  hint.classList.toggle('show', level === 1 && !saved);
-  showBanner(saved ? `继续第 ${level} 关` : `第 ${level} 关`);
-  saveGame();
-}
-
-// 下一关；通关最后一关之后，再玩就从第 1 关重新开始
-function advance() {
-  if (state !== 'cleared') return;
-  if (level < LEVELS.length) {
-    level++;
-  } else {
-    level = 1;
-    totalTime = 0;
-  }
-  startLevel(null);
-}
-
-// 重新开始：从第 1 关开始，原来的存档会被覆盖
-function resetGame() {
-  clearTimeout(clearTimer);
-  level = 1;
-  totalTime = 0;
-  startLevel(null);
-}
-
-function showClear() {
-  if (level < LEVELS.length) {
-    overlayTitle.textContent = '过关！';
-    overlayText.textContent = `第 ${level} 关用时 ${fmt(levelTime)}`;
-    nextBtn.textContent = '下一关';
-  } else {
-    overlayTitle.textContent = '全部通关！';
-    overlayText.textContent = `${LEVELS.length} 关全部通过，总用时 ${fmt(totalTime)}`;
-    nextBtn.textContent = '再玩一次';
-  }
-  overlay.classList.add('show');
 }
 
 // 打开页面时：有存档就接着玩；上次那一关已经过了（只是没点下一关）就直接进下一关
@@ -840,28 +1465,55 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// 指针：按下后移动超过 8px 就是拖动视野；松开时没有拖动，才算“点一下”
 canvas.addEventListener('pointerdown', (e) => {
   hint.classList.remove('show');
-  if (state !== 'playing') return;
-  const s = sheepAt(e.clientX, e.clientY);
-  if (s) tapSheep(s);
+  press = { id: e.pointerId, sx: e.clientX, sy: e.clientY, lx: e.clientX, ly: e.clientY, drag: false };
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
 });
 
 canvas.addEventListener('pointermove', (e) => {
-  hoverSheep = state === 'playing' ? sheepAt(e.clientX, e.clientY) : null;
-  canvas.style.cursor = hoverSheep ? 'pointer' : 'default';
+  if (press && e.pointerId === press.id) {
+    const dx = e.clientX - press.lx, dy = e.clientY - press.ly;
+    if (!press.drag && Math.hypot(e.clientX - press.sx, e.clientY - press.sy) > 8) press.drag = true;
+    if (press.drag) {
+      ox += dx;
+      oy += dy;
+      clampCam(false);
+      hoverSheep = null;
+    }
+    press.lx = e.clientX;
+    press.ly = e.clientY;
+  } else {
+    hoverSheep = state === 'playing' ? sheepAt(e.clientX, e.clientY) : null;
+    canvas.style.cursor = hoverSheep ? 'pointer' : 'default';
+  }
 });
 
-nextBtn.addEventListener('click', advance);
+canvas.addEventListener('pointerup', (e) => {
+  if (press && e.pointerId === press.id) {
+    if (!press.drag && state === 'playing') {
+      const s = sheepAt(e.clientX, e.clientY);
+      if (s) tapSheep(s);
+    }
+    press = null;
+  }
+});
+
+canvas.addEventListener('pointercancel', () => { press = null; });
+
+nextBtn.addEventListener('click', () => {
+  if (overlayAction) overlayAction();
+});
 
 resetBtn.addEventListener('click', () => {
   if (confirm('要从第 1 关重新开始吗？现在的进度会被清除。')) resetGame();
 });
 
 window.addEventListener('keydown', (e) => {
-  if ((e.key === 'Enter' || e.key === ' ') && state === 'cleared' && overlay.classList.contains('show')) {
+  if ((e.key === 'Enter' || e.key === ' ') && overlay.classList.contains('show') && overlayAction) {
     e.preventDefault();
-    advance();
+    overlayAction();
   }
 });
 
