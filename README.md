@@ -6,4 +6,6 @@
 
 进度会自动保存，下次打开接着玩。
 
+右下角的「选关」可以直接跳到任意一关，所有关卡都开放。
+
 在线试玩：https://haixionglin.github.io/sheep-game/

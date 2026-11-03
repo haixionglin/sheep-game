@@ -34,10 +34,15 @@
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
     pointer-events: none;
   }
-  #resetBtn {
+  #toolbar {
     position: fixed;
     bottom: 12px;
     right: 12px;
+    display: flex;
+    gap: 8px;
+  }
+  #resetBtn,
+  #levelBtn {
     padding: 6px 14px;
     border: none;
     border-radius: 999px;
@@ -120,18 +125,132 @@
     transform: translateY(4px);
     box-shadow: 0 1px 0 #c98a00;
   }
+  #overlayBtns {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+  #pickBtn {
+    padding: 12px 28px;
+    border: none;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.85);
+    color: #3a5a2a;
+    font-size: 21px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 5px 0 rgba(0, 0, 0, 0.18);
+  }
+  #pickBtn:active {
+    transform: translateY(4px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+  }
+  #levelMenu {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 16px;
+    box-sizing: border-box;
+    z-index: 10;
+  }
+  #levelMenu.show { display: flex; }
+  #levelPanel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 560px;
+    max-height: 88vh;
+    box-sizing: border-box;
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #3a5a2a;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  }
+  #levelHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #levelHead h2 {
+    margin: 0;
+    font-size: 22px;
+  }
+  #levelClose {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 999px;
+    background: #e7efe0;
+    color: #3a5a2a;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #levelTip {
+    margin: 8px 0 12px;
+    font-size: 14px;
+    opacity: 0.75;
+  }
+  #levelGrid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+    gap: 8px;
+    padding: 2px;
+  }
+  .lv {
+    height: 44px;
+    border: none;
+    border-radius: 10px;
+    background: #eef5e8;
+    color: #3a5a2a;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .lv.cur {
+    background: #ffb400;
+    color: #5a3b00;
+  }
+  .lv:active {
+    transform: scale(0.94);
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="hud"></div>
-<button id="resetBtn" type="button">重新开始</button>
+<div id="toolbar">
+  <button id="levelBtn" type="button">选关</button>
+  <button id="resetBtn" type="button">重新开始</button>
+</div>
 <div id="banner"></div>
 <div id="hint"></div>
 <div id="overlay">
   <h1 id="overlayTitle"></h1>
   <p id="overlayText"></p>
-  <button id="nextBtn" type="button"></button>
+  <div id="overlayBtns">
+    <button id="nextBtn" type="button"></button>
+    <button id="pickBtn" type="button">选关</button>
+  </div>
+</div>
+<div id="levelMenu">
+  <div id="levelPanel">
+    <div id="levelHead">
+      <h2>选择关卡</h2>
+      <button id="levelClose" type="button">关闭</button>
+    </div>
+    <p id="levelTip"></p>
+    <div id="levelGrid"></div>
+  </div>
 </div>
 <script>
 const canvas = document.getElementById('game');
@@ -144,6 +263,12 @@ const overlayTitle = document.getElementById('overlayTitle');
 const overlayText = document.getElementById('overlayText');
 const nextBtn = document.getElementById('nextBtn');
 const resetBtn = document.getElementById('resetBtn');
+const levelBtn = document.getElementById('levelBtn');
+const pickBtn = document.getElementById('pickBtn');
+const levelMenu = document.getElementById('levelMenu');
+const levelGrid = document.getElementById('levelGrid');
+const levelTip = document.getElementById('levelTip');
+const levelClose = document.getElementById('levelClose');
 
 const SAVE_KEY = 'sheep-game-save-v1';
 const TOP = 70, BOTTOM = 70;          // 上面留给 HUD，下面留给提示和按钮
@@ -3474,6 +3599,7 @@ let clearTimer = null, loseTimer = null;
 let overlayAction = null;
 let hudText = '';
 let last = performance.now();
+let menuOpen = false;  // 选关菜单开着的时候，游戏暂停：不计时、不判定过关/输/死路
 let press = null;      // 当前按下的指针：用来区分“点一下”和“拖动视野”
 
 const fmt = (t) => {
@@ -3568,9 +3694,7 @@ function loseLevel(r, c) {
   state = 'lost';
   eaten = { r, c, t: 0 };
   clearTimeout(loseTimer);
-  loseTimer = setTimeout(() => {
-    showOverlay('被狼吃掉了', `第 ${level} 关失败了：狼踩到了还没走的羊。`, '重新开始本关', () => startLevel(null));
-  }, 800);
+  loseTimer = setTimeout(showLost, 800);
 }
 
 // ---------- 画面 ----------
@@ -3613,20 +3737,21 @@ function updateParticles(dt) {
 }
 
 function update(dt) {
-  if (state === 'playing') levelTime += dt;
+  if (state === 'playing' && !menuOpen) levelTime += dt;
   for (const s of sheepList) s.shake = Math.max(0, s.shake - dt);
   for (const w of wolves) if (w.anim < 1) w.anim = Math.min(1, w.anim + dt / 0.22);
   if (eaten) eaten.t += dt;
   updateDashers(dt);
   updateParticles(dt);
 
+  // 选关菜单开着的时候，不判定过关、输、死路，等关掉菜单再判定
+  if (menuOpen) return;
+
   // 棋盘上还有羊，但一只都走不了：走进了死路，只能重新开始本关
   if (state === 'playing' && dashers.length === 0 && sheepList.length > 0 && !anyTappable()) {
     state = 'stuck';
     clearTimeout(loseTimer);
-    loseTimer = setTimeout(() => {
-      showOverlay('没有能走的羊了', `第 ${level} 关走进了死路：剩下的羊都被挡住了。`, '重新开始本关', () => startLevel(null));
-    }, 600);
+    loseTimer = setTimeout(showStuck, 600);
   }
 
   // 最后一只羊跑出棋盘，就过关
@@ -4095,6 +4220,52 @@ function showClear() {
   }
 }
 
+// 过关 / 被吃 / 死路 的提示：拆成函数，选关菜单关掉以后可以按当前状态弹回来
+function showLost() {
+  showOverlay('被狼吃掉了', `第 ${level} 关失败了：狼踩到了还没走的羊。`, '重新开始本关', () => startLevel(null));
+}
+
+function showStuck() {
+  showOverlay('没有能走的羊了', `第 ${level} 关走进了死路：剩下的羊都被挡住了。`, '重新开始本关', () => startLevel(null));
+}
+
+function showEndOverlay() {
+  if (state === 'cleared') showClear();
+  else if (state === 'lost') showLost();
+  else if (state === 'stuck') showStuck();
+}
+
+// 打开选关菜单：游戏暂停（不计时、不判定），正在等着弹出的提示先收起来
+function openLevelMenu() {
+  if (menuOpen) return;
+  menuOpen = true;
+  clearTimeout(clearTimer);
+  clearTimeout(loseTimer);
+  overlay.classList.remove('show');
+  for (const b of levelGrid.children) b.classList.toggle('cur', Number(b.textContent) === level);
+  levelMenu.classList.add('show');
+  levelGrid.children[level - 1].scrollIntoView({ block: 'center' });
+}
+
+function closeLevelMenu() {
+  if (!menuOpen) return;
+  menuOpen = false;
+  levelMenu.classList.remove('show');
+  showEndOverlay();
+}
+
+// 跳到选中的那一关，从头开始；点的正是当前这一关时什么也不做，进度保留
+function pickLevel(n) {
+  menuOpen = false;
+  levelMenu.classList.remove('show');
+  if (n === level) {
+    showEndOverlay();
+    return;
+  }
+  level = n;
+  startLevel(null);
+}
+
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth;
@@ -4185,10 +4356,28 @@ resetBtn.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && menuOpen) closeLevelMenu();
   if ((e.key === 'Enter' || e.key === ' ') && overlay.classList.contains('show') && overlayAction) {
     e.preventDefault();
     overlayAction();
   }
+});
+
+// 选关菜单：每一关一个按钮，当前这一关高亮
+levelTip.textContent = `共 ${LEVELS.length} 关，点一个数字，直接从那一关开始。`;
+LEVELS.forEach((_, i) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'lv';
+  b.textContent = i + 1;
+  b.addEventListener('click', () => pickLevel(i + 1));
+  levelGrid.appendChild(b);
+});
+levelBtn.addEventListener('click', openLevelMenu);
+pickBtn.addEventListener('click', openLevelMenu);
+levelClose.addEventListener('click', closeLevelMenu);
+levelMenu.addEventListener('click', (e) => {
+  if (e.target === levelMenu) closeLevelMenu();   // 点到菜单外面的暗色区域也能关
 });
 
 // 每 5 秒存一次进度，关页面或切走时也存一次，用时才不会丢太多
